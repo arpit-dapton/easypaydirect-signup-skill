@@ -209,11 +209,13 @@ if (promoCode) params.set('promo_code', promoCode);
 // Partner attribution — forward the partner key as `secretKey` so EasyPayDirect records
 // partner_id on the created application. Only if the implementer supplied a partner key.
 if (PARTNER_KEY) params.set('secretKey', PARTNER_KEY);
+// Clear any refresh-safety copy of the form so a return to this site shows a blank Step 1.
+localStorage.removeItem('signup_step_1_data');
 // BASE_URL is the single configured host (see reference/api-examples.md → "Configuration").
 window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 ```
 
-No API request, no `uuid`, and nothing to persist — the merchant leaves this site immediately. Because there is exactly one page here and the merchant is handed off after it, do not show any "Step 1 of N" / multi-step progress signal.
+No API request and no `uuid` — the merchant leaves this site immediately, and the saved form copy is cleared so returning shows an empty form. Because there is exactly one page here and the merchant is handed off after it, do not show any "Step 1 of N" / multi-step progress signal.
 
 ### Variant 2 — submit, then email a resume link
 
@@ -235,11 +237,15 @@ await fetchWithRetry(`${BASE_URL}/api/v1/signup/resume-link`, {
     body: JSON.stringify({ email: $('[name="email"]').val() })
 });
 
-// 2. Persist completion so a refresh re-shows the confirmation view, not the form
+// 2. Clear the saved form data so a later "start over" (or any return) begins with a blank form.
+//    Keep signup_completed below — that flag must survive the reload.
+localStorage.removeItem('signup_step_1_data');
+
+// 3. Persist completion so a refresh re-shows the confirmation view, not the form
 //    (see skill.md → Page Refresh Behavior).
 localStorage.setItem('signup_completed', 'true');
 
-// 3. Show the "check your email" confirmation view.
+// 4. Show the "check your email" confirmation view.
 ```
 
 **On Validation Error (HTTP 422)** (Variant 2): standard shape — see skill.md → Error Handling. Stay on Step 1, display field errors, do not change URL.

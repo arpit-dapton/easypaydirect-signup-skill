@@ -244,7 +244,7 @@ Both variants build a single Step 1 page on the partner's site; the merchant fin
 
 ### Page Refresh Behavior
 
-- **Variant 1**: the merchant is redirected off-site the instant Step 1 is valid, so there's nothing to persist. If they return to the partner site, they see a fresh, blank Step 1.
+- **Variant 1**: the merchant is redirected off-site the instant Step 1 is valid. If you persisted the form for refresh-safety, clear it on submit (`clearStep1Data()`, see "Form Data Persistence" below) so a return to the partner site shows a fresh, blank Step 1 rather than the previous entries.
 - **Variant 2**: after a successful submit + resume-email, a refresh must show the "check your email" confirmation view, **not** the Step 1 form again (resubmitting the same email would 422 with "email already registered").
 
 ⚠️ **Completion is a distinct persisted state.** In Variant 2, persist an explicit flag (e.g. `localStorage.setItem('signup_completed', 'true')`) *before* showing the confirmation view. On page load, check this flag **first**, before rendering the form: if it's set, render the confirmation view directly; otherwise render Step 1 normally. Skipping this check is what makes a refresh after a real, successful submission land back on the Step 1 form. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "After Submission".
@@ -296,6 +296,17 @@ $(document).ready(function() {
     $('#country').trigger('change'); // show/hide + require business_state for US
 });
 ```
+
+**Clear the saved form data on a successful submit — in both variants** — so a merchant who returns to the partner site gets a fresh, empty form instead of their previous entries:
+
+```javascript
+function clearStep1Data() {
+    localStorage.removeItem('signup_step_1_data');
+}
+```
+
+- **Variant 1 (redirect)**: call `clearStep1Data()` immediately before `window.location.href` — the merchant is handed off, so nothing should linger for their return.
+- **Variant 2 (resume email)**: call `clearStep1Data()` on a successful submit. Do **not** clear `signup_completed` here — that flag must survive so a reload shows the confirmation view rather than an empty, resubmittable form (see "Completion is a distinct persisted state" above). The blank form is what the merchant sees only after they use "start over".
 
 **localStorage keys**:
 

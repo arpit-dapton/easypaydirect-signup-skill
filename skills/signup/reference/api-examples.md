@@ -176,6 +176,8 @@ function redirectToEmap(step1, partnerKey) {
   // Partner attribution — forward the partner key as `secretKey` so EasyPayDirect records
   // partner_id on the created application. Only when the implementer supplied a partner key.
   if (partnerKey) params.set('secretKey', partnerKey);
+  // Clear the refresh-safety copy so returning to this site shows a blank form.
+  localStorage.removeItem('signup_step_1_data');
   window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 }
 
@@ -239,7 +241,10 @@ async function submitVariant2(step1, partnerKey) {
     body: JSON.stringify({ email: step1.email })
   });
 
-  // 3. Persist completion and show the confirmation view (see skill.md → Page Refresh Behavior)
+  // 3. Clear the saved form data so a later "start over" begins blank (keep signup_completed below).
+  localStorage.removeItem('signup_step_1_data');
+
+  // 4. Persist completion and show the confirmation view (see skill.md → Page Refresh Behavior)
   localStorage.setItem('signup_completed', 'true');
   showCheckYourEmailView(step1.email);
 }
