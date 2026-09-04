@@ -1,35 +1,46 @@
 ---
 name: signup-backend-dependencies
-description: EMAP (epd-emap) backend endpoints powering Flow Option 2 (redirect) and Option 3 (resume email)
+description: What each of the two Step-1-only signup variants needs from EasyPayDirect — the query-param redirect (Variant 1) and the resume email (Variant 2)
 ---
 
-# Backend Endpoints — Flow Options 2 & 3
+# Backend Dependencies — the Two Signup Variants
 
-These endpoints must be deployed to your target EMAP environment before Options 2 or 3 will work — confirm availability before relying on them.
+Both variants build only Step 1 on the partner's site. They differ only in what happens after Step 1.
 
 ---
 
-## 1. Flow Option 2 (Step 1 only, redirect to EMAP)
+## Variant 1 (redirect) — no backend needed
 
-Reuses an existing EMAP route — no new backend endpoint needed. After Step 1 succeeds (`POST /api/v1/signup` returns `uuid`), redirect the browser to:
+Variant 1 makes **no API call at all**. After the merchant fills Step 1, redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params — EasyPayDirect prefills its own form from them:
 
 ```
-GET {EMAP_APP_URL}/upload-document/{uuid}?redirect=1
+https://emap.epd.dev/?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}
 ```
 
-Unauthenticated — logs the merchant in by `uuid` alone and routes them to wherever their application currently stands (back into the form if incomplete, to signing if a template applies, or to the dashboard if already signed).
+- **URL-encode every value** with `encodeURIComponent`. The E.164 phone's leading `+` becomes `%2B`.
+- **`company_name` maps to the Step 1 field named `name`** (the company-name field is `name`, not `company_name`).
+- Only these 7 fields are forwarded. `country`, `business_state`, `promo_code`, and `partner_key` are still collected on the form but are not part of the redirect.
+- No `form_id` is sent — it is not required for this flow.
 
-**Requires `"step_count": 1` in the Step 1 payload** — without it, this redirect lands back on Step 1 instead of Step 2. See [steps/STEP1_ACCOUNT_INFORMATION.md](../steps/STEP1_ACCOUNT_INFORMATION.md).
+Because nothing is submitted to `/api/v1/signup`, there is no `uuid`, no persisted application, and no partner attribution in this variant.
 
 ---
 
-## 2. Flow Option 3 (resume email) — `POST /api/v1/signup/resume-link`
+## Variant 2 (resume email) — two API calls
 
-Unauthenticated. Callable from Step 2 onward of the partner-hosted form (e.g. a "Finish later" button) — not on Step 1, since no `uuid`/application exists yet to resume into.
+Variant 2 submits Step 1, then triggers an email so the merchant can continue on EasyPayDirect.
 
-**The `/api` prefix is not optional.** EMAP's CORS config only allows cross-origin requests under `api/*` — this route (and every other `/v1/*` route in this skill) only exists on the server as `/api/v1/...`. Call the bare `/v1/...` path from a partner-hosted form and the request isn't covered by CORS at all: the OPTIONS preflight falls through to the app's default routing instead of getting proper `Access-Control-Allow-*` headers, and the browser reports it as a network error with no real response. If a "finish later" call ever starts failing this way, check the URL for a missing `/api` first.
+### 1. `POST /api/v1/signup`
 
-⚠️ Even with the correct `/api` prefix, this call (like every other fetch to a `v1` endpoint) can occasionally fail on the very first attempt due to a transient cross-origin connection hiccup and succeed immediately on a plain retry. Call it through the `fetchWithRetry` helper documented in [skill.md § Network Resilience](../SKILL.md#network-resilience--retry-once-on-transient-fetch-failure) rather than a raw `fetch(...).catch(...)`, so a "finish later" click doesn't need to be clicked twice.
+Standard Step 1 submission (see [steps/STEP1_ACCOUNT_INFORMATION.md](../steps/STEP1_ACCOUNT_INFORMATION.md)). Include `"step_count": 1` so the application is recorded as having reached Step 1 (the emailed resume link then lands the merchant past Step 1 rather than back at the start). Include `partner_key` only if the implementer supplied one. Returns a `uuid`.
+
+### 2. `POST /api/v1/signup/resume-link`
+
+Unauthenticated. Call it immediately after the signup POST succeeds, with the same email the merchant just entered.
+
+**The `/api` prefix is not optional.** EasyPayDirect's CORS config only allows cross-origin requests under `api/*` — this route only exists on the server as `/api/v1/signup/resume-link`. Calling the bare `/v1/...` path from a partner-hosted form isn't covered by CORS: the OPTIONS preflight falls through to default routing without proper `Access-Control-Allow-*` headers, and the browser reports a network error with no real response. If a resume-email call fails this way, check the URL for a missing `/api` first.
+
+⚠️ Like every fetch to a `v1` endpoint, this call can occasionally fail on the very first attempt due to a transient cross-origin connection hiccup and succeed on a plain retry. Call it through the `fetchWithRetry` helper (see [skill.md § Network Resilience](../SKILL.md#network-resilience--retry-once-on-transient-fetch-failure)) rather than a raw `fetch(...).catch(...)`.
 
 **Request**:
 ```json
@@ -48,7 +59,7 @@ Unauthenticated. Callable from Step 2 onward of the partner-hosted form (e.g. a 
 
 ## Summary
 
-| Flow | Endpoint |
+| Variant | What it needs from EasyPayDirect |
 |---|---|
-| Option 2 (redirect after Step 1) | See "Flow Option 2" above — requires `"step_count": 1` in the Step 1 payload |
-| Option 3 (resume email) | `POST /api/v1/signup/resume-link` — only enable from Step 2 onward |
+| 1 (redirect) | Nothing — client-side redirect to `https://emap.epd.dev/?...` with the 7 mapped query params |
+| 2 (resume email) | `POST /api/v1/signup` (with `step_count:1`), then `POST /api/v1/signup/resume-link` with the email |

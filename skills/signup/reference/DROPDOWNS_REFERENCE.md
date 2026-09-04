@@ -1,29 +1,27 @@
 # API Dropdowns Reference
 
-API-backed dropdown values used throughout the signup form. See [DROPDOWNS_STATIC_REFERENCE.md](DROPDOWNS_STATIC_REFERENCE.md) for static (non-API) dropdown values, dropdown UI implementation, and conversion/testing reference.
+API-backed dropdown values used by the signup form. Step 1 is the only step, and it has exactly two dropdowns — **Countries** and **US States** — both fetched from the API.
 
-⚠️ **None of the endpoints below require an auth header** (see skill.md → Authentication).
+⚠️ **Neither endpoint requires an auth header** (see skill.md → Authentication).
 
 ## Contents
-- API-Based Dropdowns (Countries, States, Industry Types, Referral Sources, Shopping Carts, Interest Details)
+- Countries
+- US States
+- Dropdown implementation (fetch, populate, validate)
 - Value vs Label
 
 ---
 
 ## API-Based Dropdowns
 
-⚠️ **The field to use as each `<option>`'s value is NOT the same across these endpoints — check this table before writing any shared dropdown-loading helper.** Countries and States return a `code` field. Industry Types, Referral Sources, Shopping Carts, and Interest Details return **only `slug`** — they have no `code` or `id` field at all. A helper that defaults to `item.code`, falling back to `item.id`, will silently render `value="undefined"` for every option in those four dropdowns. The label (from `item.name`) still displays correctly, so this looks completely fine on screen — the option reads "Retail," the user picks "Retail" — and only surfaces once the form is submitted and the backend rejects the literal string `"undefined"` as an invalid selection. See [DROPDOWNS_STATIC_REFERENCE.md § Pulling from API](DROPDOWNS_STATIC_REFERENCE.md#pulling-from-api) for a loader that takes the value field explicitly per call instead of guessing.
-
-| Endpoint | Value field | Steps that use it |
+| Endpoint | Value field | Used by |
 |---|---|---|
-| `/api/partner/countries` | `code` | 1, 2, 4, 5 |
-| `/api/partner/states` | `code` | 1, 5 |
-| `/api/partner/industry-types` | `slug` | 2 |
-| `/api/partner/referral-sources` | `slug` | 6 |
-| `/api/partner/shopping-carts` | `slug` | 3 |
-| `/api/partner/interest-details` | `slug` | 6 |
+| `/api/partner/countries` | `code` | Step 1 (`country`) |
+| `/api/partner/states` | `code` | Step 1 (`business_state`, US only) |
 
-### Countries (Step 1, Step 2, Step 4, Step 5)
+Both endpoints return a `code` field — always use `code` (the slug, e.g. `"US"`) as each `<option>`'s value, never the numeric `id`. Submitting the `id` is rejected by the backend.
+
+### Countries
 **Endpoint**: `GET /api/partner/countries`
 
 **Response Format**:
@@ -38,22 +36,17 @@ API-backed dropdown values used throughout the signup form. See [DROPDOWNS_STATI
 }
 ```
 
-**⚠️ CRITICAL: Use the `code` field (slug) as option value, NOT `id`**
+**⚠️ CRITICAL: Use the `code` field as option value, NOT `id`.**
 
-**Form Submission**: Use code values
-- United States: "US"
-- Canada: "CA"
-- Mexico: "MX"
+**Form Submission**: Use code values (`"US"`, `"CA"`, `"MX"`, ...).
 
-**Conditional Logic**: Use code values for show/hide logic
-- Show business_state if country = "US"
-- Show driver_license_state and driver_license_expiration_date (Step 4 owner) if country = "US" — `license` itself is always visible/required regardless of country
+**Conditional Logic**: Use code values for show/hide logic — show `business_state` only when `country = "US"`.
 
 ---
 
-### US States (Step 1, Step 5)
+### US States
 **Endpoint**: `GET /api/partner/states`
-**Conditional**: Show only when country = "US" (use country code/slug, not id)
+**Conditional**: Shown only when `country = "US"` (compare against the country `code`, not `id`).
 
 **Response Format**:
 ```json
@@ -69,130 +62,59 @@ API-backed dropdown values used throughout the signup form. See [DROPDOWNS_STATI
 
 ---
 
-### Industry Types (Step 2)
-**Endpoint**: `GET /api/partner/industry-types`
+## Dropdown Implementation
 
-**Response Format**:
-```json
-{
-  "success": true,
-  "data": [
-    { "name": "Retail", "slug": "retail" },
-    { "name": "E-commerce", "slug": "ecommerce" },
-    { "name": "SaaS", "slug": "saas" }
-  ]
+Both `country` and `business_state` are **plain, normal `<select>` elements** — no searchable/live-search UI, no third-party select-enhancement library.
+
+**HTML Template**:
+```html
+<div class="form-group">
+    <label for="country">Country *</label>
+    <select id="country" name="country" class="form-control" required>
+        <option value="" disabled selected>Select Country...</option>
+        <!-- Options populated via JavaScript -->
+    </select>
+    <div class="invalid-feedback" id="country_error"></div>
+</div>
+```
+
+**JavaScript — fetch & populate**. Pass the value field (`code`) explicitly and fail loudly if an item is missing it, rather than silently rendering `value="undefined"`:
+```javascript
+async function loadDropdown(endpoint, selectEl, valueKey) {
+    const res = await fetch(endpoint).then(r => r.json());
+    res.data.forEach(item => {
+        const value = item[valueKey];
+        if (value === undefined) {
+            console.error(`${endpoint}: item has no "${valueKey}" field`, item);
+            return; // skip rather than render value="undefined"
+        }
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = item.name;
+        selectEl.appendChild(option);
+    });
 }
+
+// Both Step 1 dropdowns use 'code'.
+loadDropdown('/api/partner/countries', document.querySelector('select[name="country"]'), 'code');
+// States load the same way; show/require the field only when country === 'US'.
 ```
 
-**Known Values** (Static Fallback):
-```
-- Retail
-- E-commerce
-- SaaS
-- Services
-- Adult-Other
-- [Others from API]
-```
-
----
-
-### Referral Sources (Step 6)
-**Endpoint**: `GET /api/partner/referral-sources`
-
-**Response Format**:
-```json
-{
-  "success": true,
-  "data": [
-    { "name": "Google Search", "slug": "1" },
-    { "name": "Friend", "slug": "14" },
-    { "name": "Live Event", "slug": "8" },
-    { "name": "Other", "slug": "50" }
-  ]
-}
-```
-
-**Known Values**:
-```
-- Google Search (slug: 1)
-- Friend (slug: 14)
-- Live Event (slug: 8)
-- Other (slug: 50)
-[More from API]
+**Conditional visibility** — when `country` changes, show/hide `business_state`:
+```javascript
+$('#country').on('change', function () {
+    const isUS = $(this).val() === 'US';
+    $('#business_state_group').toggle(isUS);
+    $('#business_state').prop('required', isUS);
+    if (!isUS) $('#business_state').val('');
+});
 ```
 
 ---
 
-### Shopping Carts / CRM (Step 3)
-**Endpoint**: `GET /api/partner/shopping-carts`
+## Value vs Label
 
-**Response Format**:
-```json
-{
-  "success": true,
-  "data": [
-    { "name": "Shopify", "slug": "1" },
-    { "name": "WooCommerce", "slug": "2" },
-    { "name": "Other", "slug": "8" },
-    { "name": "API / Custom Integration", "slug": "58" }
-  ]
-}
-```
+- **Label** (displayed to the user): "United States", "California".
+- **Value** (submitted to the API): the `code`, e.g. "US", "CA".
 
-**Known Values**:
-```
-- Shopify (id: 1)
-- WooCommerce (id: 2)
-- Magento
-- BigCommerce
-- Etsy
-- Amazon
-- [Others]
-- Other (id: 8) ← Triggers text field
-- API / Custom Integration (id: 58) ← Triggers text field
-```
-
-**Conditional Logic**:
-- If value = "8" OR "58" → Show "Other Sales Platform" text field
-- Otherwise → Hide text field
-
----
-
-### Interest Details (Step 6)
-**Endpoint**: `GET /api/partner/interest-details`
-
-**Response Format**:
-```json
-{
-  "success": true,
-  "data": [
-    { "name": "Capital", "slug": "capital" },
-    { "name": "Resources", "slug": "resources" },
-    { "name": "Marketing", "slug": "marketing" },
-    { "name": "Integration", "slug": "integration" }
-  ]
-}
-```
-
-**Known Values**:
-```
-- Capital
-- Resources
-- Marketing
-- Integration
-[More from API]
-```
-
----
-
-## Important: Value vs Label
-
-**All dropdowns follow this pattern:**
-- **Label** (displayed to user): "0-7 days", "Full Refund", etc.
-- **Value** (submitted to API): Slug format "0-7-days", "Full-Refund", etc.
-
-Always use the **slug value** when submitting, not the display label.
-
----
-
-**Continue to**: [DROPDOWNS_STATIC_REFERENCE.md](DROPDOWNS_STATIC_REFERENCE.md) for static dropdown values, dropdown UI implementation, conversion reference, and testing checklist.
+Always submit the `code` value, never the display label.

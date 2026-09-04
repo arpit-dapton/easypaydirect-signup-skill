@@ -1,11 +1,11 @@
 ---
-name: creating-emap-signup-forms
-description: Build a complete merchant onboarding system with a comprehensive 6-step signup form. Collect account details, company information, product specifics, owner information, banking details, and final preferences. Features intelligent field dependencies, multi-owner support, and seamless API integration with production-ready validation and error handling.
+name: creating-easypaydirect-signup-forms
+description: Build a merchant onboarding entry form that collects account details on a single Step 1 page, then hands the merchant off to EasyPayDirect by one of two variants — a query-param redirect to EasyPayDirect's hosted signup, or a resume-link email. Features phone/country/state field handling, optional partner attribution, and production-ready validation and error handling.
 ---
 
 # Merchant Signup Form Specification
 
-Production-ready specification for building the complete 6-step signup form.
+Production-ready specification for building the Step 1 account form and handing the merchant off to EasyPayDirect. There is only one step on the partner's site; the merchant completes the rest of their application on EasyPayDirect itself.
 
 ---
 
@@ -34,35 +34,33 @@ Then act on their answer:
 | **1. Enter partner key** | Collect the exact key value from them. When you build Step 1's submission, include it as `partner_key` in the **Step 1 JSON payload body** (not a header) — see [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) and "Partner Attribution Payload" below. |
 | **2. Skip** | Do not include `partner_key` in the payload at all. Do not send an empty string, `null`, or a placeholder. |
 
+ℹ️ `partner_key` is only ever sent in **Variant 2** (the resume-email flow), which is the only variant that calls `POST /api/v1/signup`. **Variant 1** (redirect) makes no API call, so there is nowhere to attribute a partner key — collect the answer anyway (the merchant may not have picked a variant yet), but know it has no effect if they choose Variant 1.
+
 Only after the user has actually answered this question should you continue to the next mandatory step below.
 
 ---
 
 ## 🛑 MANDATORY SECOND STEP — Choose the Signup Flow
 
-**After the partner-key question above, and still before writing any code, ask which signup experience to build.** This is also a hard gate — do not default to Option 1 on the user's behalf, and do not skip this because it seems like the obvious choice. The person answering is very likely not a developer and has no reason to know internal terms like "steps" or "flows" — ask in plain language about what the merchant visiting their site will actually experience, not in the codebase's own jargon.
+**After the partner-key question above, and still before writing any code, ask which signup experience to build.** This is also a hard gate — do not default to a variant on the user's behalf, and do not skip this because it seems like the obvious choice. The person answering is very likely not a developer and has no reason to know internal terms like "steps," "flows," "redirect," or "resume-link" — ask in plain language about what the merchant visiting their site will actually experience, not in the codebase's own jargon.
 
-**Ask exactly this, with exactly three options, and wait for the reply before proceeding.** Display it verbatim — do not annotate the options with implementation terms (e.g. "(Step 1)", "(all 6 steps)", "flow") pulled from the table further below. That table is internal guidance for you to act on after they answer; none of its terminology belongs in what the person actually sees.
+**Ask exactly this, with exactly two options, and wait for the reply before proceeding.** Display it verbatim — do not annotate the options with implementation terms (e.g. "(Step 1)", "(redirect)", "(Variant)") pulled from the table further below. That table is internal guidance for you to act on after they answer; none of its terminology belongs in what the person actually sees.
 
 > How do you want the sign-up process to work for merchants on your site?
-> 1. **All in one place** — the merchant fills out their entire application on your website, from start to finish. They never have to leave your site.
-> 2. **Quick start, then handed off** — the merchant only enters their basic contact info on your website. As soon as they submit that, they're automatically taken to EMAP's own website to finish the rest of their application there.
-> 3. **All in one place, with a "save and finish later" option** — same as option 1 (the whole application happens on your website), but if a merchant gets interrupted partway through, they can request an email with a link that lets them pick up right where they left off.
+> 1. **Quick start, then continue on EasyPayDirect** — the merchant enters their basic contact info on your website. As soon as they submit it, they're taken straight to EasyPayDirect's own website to finish the rest of their application there.
+> 2. **Quick start, then we email them a link** — the merchant enters their basic contact info on your website. As soon as they submit it, EasyPayDirect emails them a link they can use to finish the rest of their application whenever they're ready.
 
 Then act on their answer:
 
-| Answer | What to do |
+| Answer | What to do (internal) |
 |---|---|
-| **1. All in one place** | Proceed exactly as documented in the rest of this file — no changes needed. This is fully supported today. Internally this is the regular flow: all 6 steps, completed on this form. |
-| **2. Quick start, then handed off** | Supported, no new backend endpoint needed. Internally this means: only scaffold Step 1's page/form — **do not build Steps 2–6 at all.** The merchant leaves this site the moment Step 1 succeeds, so any Step 2–6 UI would be dead code, never reached. **Also strip every "N of 6" / multi-step signal from the one page you do build** — no 6-dot progress bar, no "Step 1 of 6" subtitle, no step counter of any kind. There is exactly one step on this site; showing "1 of 6" falsely promises the merchant 5 more steps here before they get redirected away entirely. If you want a progress affordance at all, it must not imply steps beyond this one (e.g. a plain "Create your account" heading with no counter). After a successful Step 1 submission, redirect the browser straight to `{EMAP_APP_URL}/upload-document/{uuid}?redirect=1` (using the `uuid` returned by `POST /api/v1/signup`) — this is EMAP's own existing auto-login + resume route (the same one its admin dashboard's "Resume Merchant Signup" button already links to). See "Flow Option 2 & 3 Backend Endpoints" below. |
-| **3. All in one place, with "save and finish later"** | Supported. Internally this means: all 6 steps, same as option 1, plus wire a "finish later" action that calls `POST /api/v1/signup/resume-link` with the merchant's `email`. **Only show/enable this on Step 2 onward** — before Step 1 is submitted there's no `uuid`/application saved server-side yet, so the email lookup can't resume anything (it just falls back to a blank `/signup?email=...` restart). **The "finish later" button must never prompt the merchant to type/re-enter their email** — read it silently from the already-persisted Step 1 data (the same source `restoreStepData(1, ...)` reads from) and send it straight to `resume-link`. The merchant already gave their email once, on Step 1; asking them for it a second time on a "click one button" action is an unnecessary extra step, and there's no scenario where a different email would even be useful (an email that doesn't match Step 1's has nothing to resume). If no email is found in the persisted Step 1 data (e.g. corrupted/cleared local storage), show an inline error asking the merchant to restart from Step 1 — do not fall back to showing a text input. See "Flow Option 2 & 3 Backend Endpoints" below. |
+| **1. Quick start, then continue on EasyPayDirect** (Variant 1 — redirect) | Build **only** the Step 1 page/form. On a valid submit, make **no API call** — instead redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params: `https://emap.epd.dev/?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}`. URL-encode every value (use `URLSearchParams`); **`company_name` maps to the field named `name`**; do **not** send `form_id`. Only those 7 fields are forwarded — `country`/`business_state`/`promo_code`/`partner_key` are still collected on the form but not part of the redirect. **Strip every "N of N" / multi-step signal** — no progress bar, no "Step 1 of …" subtitle, no step counter. There is exactly one step on this site. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
+| **2. Quick start, then we email them a link** (Variant 2 — resume email) | Build **only** the Step 1 page/form. On a valid submit, `POST /api/v1/signup` (with `"step_count": 1`, and `partner_key` if the implementer supplied one) to create the application, then — automatically, no extra click — `POST /api/v1/signup/resume-link` with the merchant's `email` (read straight from the just-submitted Step 1 data; never prompt them to re-enter it). Then persist a completion flag and show a "check your email" confirmation view. **Strip every multi-step signal** here too — this site has one step. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
 
-### Flow Option 2 & 3 Backend Endpoints
+### Variant 1 & 2 Backend Endpoints
 
-Verified end-to-end against `origin/staging` of `epd-emap` (2026-09-01):
-
-- **Option 2 (redirect after Step 1)** needs no new backend code. Just redirect the browser to `GET {EMAP_APP_URL}/upload-document/{uuid}?redirect=1` (existing, unauthenticated-safe route — it logs the merchant in by `uuid` and routes them to wherever their application currently stands). This correctly lands on Step 2 (not Step 1) as long as the Step 1 payload includes `"step_count": 1` — see [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md).
-- **`POST /api/v1/signup/resume-link`** — body `{"email": "<merchant's email>"}`. Returns `{"status":true,"message":"Resume link sent"}` (200, always — mirrors the existing EMAP "finish later" feature's own behavior of never revealing whether an email matches an account) and emails the merchant a resume link via EMAP's existing "finish later" template; `422` for a missing/invalid email, `429` if rate-limited (5 requests / 5 minutes per IP). This is EMAP's existing `SignupController::sendFinishLaterLink` logic reused as-is, just with its `auth()` session check swapped for an email lookup since a partner-hosted form's visitor has no EMAP session. Hide/disable the "finish later" button on Step 1 — before Step 1 is submitted there's no saved `uuid`/application tied to the merchant's email, so there's nothing to resume yet.
+- **Variant 1 (redirect)** needs no backend at all — it's a pure client-side redirect to `https://emap.epd.dev/?<query params>`. EasyPayDirect prefills its own form from the params. Nothing in the API changes or is called.
+- **Variant 2 (resume email)** — `POST /api/v1/signup` then `POST /api/v1/signup/resume-link` (body `{"email": "<merchant's email>"}`). The latter returns `{"status":true,"message":"Resume link sent"}` (200, always — never reveals whether an email matches an account) and emails the merchant a resume link via EasyPayDirect's existing "finish later" template; `422` for a missing/invalid email, `429` if rate-limited (5 requests / 5 minutes per IP). Both endpoints are unauthenticated. Include `"step_count": 1` in the signup payload so the emailed link resumes past Step 1 rather than at the start.
 
 Full detail and implementation notes are in [reference/BACKEND_DEPENDENCIES.md](reference/BACKEND_DEPENDENCIES.md).
 
@@ -73,23 +71,21 @@ Full detail and implementation notes are in [reference/BACKEND_DEPENDENCIES.md](
 | Step | Title | File | Fields | Features |
 |------|-------|------|--------|----------|
 | 1 | Account Information | [STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) | 11 | Phone formatting, country/state selection, optional partner attribution |
-| 2 | Company Information | [STEP2_COMPANY_INFORMATION.md](steps/STEP2_COMPANY_INFORMATION.md) / [CONDITIONALS](steps/STEP2_COMPANY_INFORMATION_CONDITIONALS.md) | 26 | Manual address entry (legal + physical), revenue model with nested conditionals (country/state collected in Step 1) |
-| 3 | Product Information | [STEP3_PRODUCT_INFORMATION.md](steps/STEP3_PRODUCT_INFORMATION.md) | 13 | Fulfillment details, transaction slider (multiples of 5) |
-| 4 | Owner Information | [STEP4_OWNER_INFORMATION.md](steps/STEP4_OWNER_INFORMATION.md) / [FIELDS](steps/STEP4_OWNER_INFORMATION_FIELDS.md) / [IMPLEMENTATION](steps/STEP4_OWNER_INFORMATION_IMPLEMENTATION.md) | 45+ | Primary contact, Owner 1 & conditional Owner 2, manual address entry, driver's license, financial history |
-| 5 | Banking Information | [STEP5_BANKING_INFORMATION.md](steps/STEP5_BANKING_INFORMATION.md) | 9 | Routing validation, country-specific fields |
-| 6 | Final Details | [STEP6_FINAL_DETAILS.md](steps/STEP6_FINAL_DETAILS.md) | 11 | Interest selection, terms acceptance |
 
-**Total Fields**: 115+ (11+26+13+45+9+11 across all 6 steps; Step 4 varies with conditional Owner 2)
+**Total Fields**: 11 (Step 1 is the only step on the partner's site; the merchant completes the rest of their application on EasyPayDirect).
+
+The two variants (see "MANDATORY SECOND STEP") both build this one Step 1 page and differ only in what happens on submit — a query-param redirect to EasyPayDirect (Variant 1), or a `POST /api/v1/signup` + resume-link email (Variant 2).
 
 ---
 
 ## Quick Reference Files
 
 **Supporting Documentation**:
-- [reference/DROPDOWNS_REFERENCE.md](reference/DROPDOWNS_REFERENCE.md) / [STATIC](reference/DROPDOWNS_STATIC_REFERENCE.md) - All dropdown values (API + static)
-- [reference/api-examples.md](reference/api-examples.md) - Copy-paste JavaScript & cURL code
+- [reference/DROPDOWNS_REFERENCE.md](reference/DROPDOWNS_REFERENCE.md) - Country & US-State dropdown values and implementation
+- [reference/api-examples.md](reference/api-examples.md) - Copy-paste JavaScript & cURL code for both variants
+- [reference/BACKEND_DEPENDENCIES.md](reference/BACKEND_DEPENDENCIES.md) - What each variant needs from EasyPayDirect
 
-Conditional/dependent field logic lives in each step file's own "Dependent Fields" / "Conditional Logic" section — there is no separate reference file for this; the step file is the single source of truth.
+Conditional/dependent field logic lives in the Step 1 file's own "Dependent Fields" section — there is no separate reference file for this; the step file is the single source of truth.
 
 ---
 
@@ -109,7 +105,7 @@ Before building the form, configure this **required** parameter:
 
 ### Authentication
 
-⚠️ **None of these endpoints require authentication.** No header is required to submit any of the 6 steps or to fetch any dropdown data — call every endpoint listed in this skill directly with `base_url`, no key needed.
+⚠️ **None of these endpoints require authentication.** No header is required to submit Step 1 (`/api/v1/signup`), to send the resume-link email (`/api/v1/signup/resume-link`), or to fetch dropdown data — call every endpoint listed in this skill directly with `base_url`, no key needed. (Variant 1 doesn't call the API at all.)
 
 ```javascript
 headers: {
@@ -132,27 +128,28 @@ Reference for the `partner_key` field asked about above:
 
 This is **not authentication** — it only attributes the signup to a partner account for commission/reporting purposes:
 - If `partner_key` is present but doesn't match any user's key, Step 1 still succeeds; the signup just isn't attributed to a partner.
-- Steps 2–6 (`/api/v1/application/step`, `/api/v1/ownership`) have no equivalent field — `partner_key` is Step 1 only.
+- Only sent in Variant 2, the only variant that POSTs to `/api/v1/signup`. Variant 1 (redirect) makes no API call, so `partner_key` has no effect there.
 
 ---
 
 ### Error Handling
 
+Only Variant 2 calls the API, so error handling applies to Variant 2 only (Variant 1 just redirects). The two endpoints it hits are `POST /api/v1/signup` and `POST /api/v1/signup/resume-link`.
+
 **Status codes actually returned by the backend** (verified against `SignupAPIController` and its FormRequest classes):
 
-| Code | When | Endpoints |
-|------|------|-----------|
-| 200 | Success — **every** success response uses 200, never 201 | All |
-| 200 | ⚠️ "Company already exists" during Step 1 — `status:false` but HTTP 200 (no error code set) | Step 1 only |
-| 400 | Bad request — generic exception caught | Steps 1, 2/3/5/6 |
-| 403 | Blocked region (geo-check) | Step 1 only |
-| 404 | Application or Company not found for the given `uuid` | Steps 2/3/5/6, Step 4 |
-| 422 | Validation failed | All (via FormRequest `failedValidation`) |
-| 500 | Server error — generic exception caught | Step 4 only (steps 1/2/3/5/6 use 400 for the same case) |
+| Code | When | Endpoint |
+|------|------|----------|
+| 200 | Success — **every** success response uses 200, never 201 | Both |
+| 200 | ⚠️ "Company already exists" during signup — `status:false` but HTTP 200 (no error code set) | `/api/v1/signup` |
+| 400 | Bad request — generic exception caught | `/api/v1/signup` |
+| 403 | Blocked region (geo-check) | `/api/v1/signup` |
+| 422 | Validation failed (e.g. missing/invalid `email`) | Both (via FormRequest `failedValidation`) |
+| 429 | Rate-limited (5 requests / 5 minutes per IP) | `/api/v1/signup/resume-link` |
 
-⚠️ **Always check the `status` boolean in the response body — do not rely on the HTTP status code alone.** The Step 1 "Company already exists" case returns HTTP 200 with `status:false`.
+⚠️ **Always check the `status` boolean in the response body — do not rely on the HTTP status code alone.** The signup "Company already exists" case returns HTTP 200 with `status:false`.
 
-**422 Validation Error** (all endpoints, thrown by each FormRequest's `failedValidation`):
+**422 Validation Error** (thrown by the FormRequest's `failedValidation`):
 ```json
 {
   "status": false,
@@ -163,30 +160,22 @@ This is **not authentication** — it only attributes the signup to a partner ac
   }
 }
 ```
-Steps 2/3/5/6 additionally include `"step": <step_count>` in this response.
 
-**404 Not Found** (Steps 2/3/4/5/6 — application or company missing for the `uuid`):
-```json
-{ "status": false, "message": "Application not found" }
-```
-or `"message": "Company not found"`.
-
-**400 / 500 Generic Error** (uncaught exception):
+**400 Generic Error** (uncaught exception on `/api/v1/signup`):
 ```json
 { "status": false, "message": "Error", "data": "<exception message>" }
 ```
-Step 4 (`handleOwnership`) uses HTTP 500 for this; every other step uses HTTP 400 for the same shape.
 
-**403 Blocked Region** (Step 1 only, geo-IP check):
+**403 Blocked Region** (`/api/v1/signup`, geo-IP check):
 ```json
 { "status": false, "message": "Unauthorised access." }
 ```
 
-**Recommended client handling**:
+**Recommended client handling** (Variant 2):
 ```javascript
-function handleStepResponse(response, httpStatus) {
+function handleSignupResponse(response, httpStatus) {
   if (response.status === true) {
-    // proceed to next step using response.uuid
+    // signup succeeded — go on to send the resume-link email
     return;
   }
   if (httpStatus === 422) {
@@ -194,22 +183,19 @@ function handleStepResponse(response, httpStatus) {
     for (const [field, messages] of Object.entries(response.errors || {})) {
       displayErrorForField(field, messages[0]);
     }
-    return; // stay on current step, do not change URL
+    return; // stay on Step 1, do not change URL
   }
-  if (httpStatus === 404) {
-    // uuid is stale/invalid — restart from Step 1
-    return;
-  }
-  // 400/403/500 or status:false with HTTP 200 — show response.message to the user
+  // 400/403/429, or status:false with HTTP 200 (e.g. "Company already exists")
+  // — show response.message to the user
   showError(response.message);
 }
 ```
 
 ### Network Resilience — Retry Once on Transient Fetch Failure
 
-⚠️ **Observed in testing**: a `fetch()` call to any `v1` signup endpoint can occasionally fail on the very first attempt (the promise rejects or the response body fails to parse) even though the backend actually processed the request successfully and a plain retry with the same payload immediately succeeds. Symptom: the user clicks "Continue" (or "Save and finish later"), sees a generic network-error banner and stays on the same step, then clicks again with no other change and it proceeds normally. This looks like a transient hiccup on the cross-origin connection to the EMAP host (e.g. a cold-connection first request), not a payload or endpoint bug.
+⚠️ **Observed in testing**: a `fetch()` call to a `v1` signup endpoint can occasionally fail on the very first attempt (the promise rejects or the response body fails to parse) even though the backend actually processed the request successfully and a plain retry with the same payload immediately succeeds. Symptom: the user clicks "Continue," sees a generic network-error banner and stays on Step 1, then clicks again with no other change and it proceeds normally. This looks like a transient hiccup on the cross-origin connection to the EasyPayDirect host (e.g. a cold-connection first request), not a payload or endpoint bug.
 
-**Do not make the user click twice to work around this.** Every submit/fetch call in this skill (Steps 1-6 and the resume-link "finish later" call) must retry once automatically before showing an error, using a shared helper:
+**Do not make the user click twice to work around this.** In Variant 2, both API calls — the Step 1 `POST /api/v1/signup` and the `POST /api/v1/signup/resume-link` — must retry once automatically before showing an error, using a shared helper (Variant 1 makes no fetch call, so this doesn't apply to it):
 
 ```javascript
 function fetchWithRetry(url, options, retries) {
@@ -227,92 +213,32 @@ function fetchWithRetry(url, options, retries) {
 }
 ```
 
-Use `fetchWithRetry(url, options)` in place of the raw `fetch(url, options).then(r => r.json()...)` pattern shown elsewhere in this skill, for every step's submission call and for the resume-link call. Only the final failure (after the retry is exhausted) should reach the `.catch()` that shows "Network error. Please check your connection and try again." to the user.
+Use `fetchWithRetry(url, options)` in place of the raw `fetch(url, options).then(r => r.json()...)` pattern for Variant 2's signup call and its resume-link call. Only the final failure (after the retry is exhausted) should reach the `.catch()` that shows "Network error. Please check your connection and try again." to the user.
 
 ---
 
 ## Guidance
 
-### How Step Progression Works
+### There Is Only One Step
 
-1. Submitting Step 1 returns a `uuid` in the response — this is the unique identifier for the signup session.
-2. Pass that same `uuid` in the payload of every subsequent step submission (Steps 2–6) so each step's data is saved against the correct session.
-3. The `uuid` does not change for the lifetime of the signup flow — obtain it once, then reuse it on every step save.
+Both variants build a single Step 1 page on the partner's site; the merchant finishes their application on EasyPayDirect. So there is no multi-step navigation, no passing a `uuid` between steps, and no "back to a previous step" here.
+
+- **Variant 1 (redirect)** makes no API call and returns no `uuid`. On a valid submit it hands off to EasyPayDirect via a query-param redirect (see [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff").
+- **Variant 2 (resume email)** submits once to `POST /api/v1/signup` (returning a `uuid`), then calls `POST /api/v1/signup/resume-link`. The `uuid` is not reused for any further step — resume-link is keyed by `email`.
 
 ### Page Refresh Behavior
 
-- If the user refreshes the page mid-flow, the form must resume on the same step they were on — it should **not** reset back to Step 1.
-- Persist the current step number and `uuid` so they can be restored after a refresh, using whichever state mechanism fits the implementation (e.g., URL, storage, session).
+- **Variant 1**: the merchant is redirected off-site the instant Step 1 is valid, so there's nothing to persist. If they return to the partner site, they see a fresh, blank Step 1.
+- **Variant 2**: after a successful submit + resume-email, a refresh must show the "check your email" confirmation view, **not** the Step 1 form again (resubmitting the same email would 422 with "email already registered").
 
-⚠️ **A completed signup is a distinct persisted state — not just "step 6."** Step 6's success handler (see [steps/STEP6_FINAL_DETAILS.md § Form Submission & Final Redirect](steps/STEP6_FINAL_DETAILS.md#form-submission--final-redirect)) must persist an explicit completed flag (e.g. `localStorage.setItem('signup_completed', 'true')`) *before* showing the success view — do not rely on the step number alone (e.g. `signup_step = 6`) to mean "done," since that value is indistinguishable from "currently filling out Step 6." On page load/refresh, check this completed flag **first**, before the normal step-restore logic runs: if it's set, render the success view directly; only fall through to "resume at the persisted step number" when it isn't. Skipping this check is what makes a refresh after a real, successful completion land back on Step 6's form instead of the success view.
+⚠️ **Completion is a distinct persisted state.** In Variant 2, persist an explicit flag (e.g. `localStorage.setItem('signup_completed', 'true')`) *before* showing the confirmation view. On page load, check this flag **first**, before rendering the form: if it's set, render the confirmation view directly; otherwise render Step 1 normally. Skipping this check is what makes a refresh after a real, successful submission land back on the Step 1 form. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "After Submission".
 
-### Re-submission Behavior (Back Navigation)
+### Form Data Persistence (Refresh Safety)
 
-**All 6 steps accept re-submission.** If a user navigates back to a step they already completed and submits it again, the same API endpoint is called with the same `uuid` — the backend upserts (updates) the existing record rather than creating a duplicate.
-
-Rules that apply to every step:
-
-- **The submit button must never be disabled** for a completed step. Re-submission must always be possible.
-- **Pre-fill fields with the previously saved values** (from localStorage or persisted state) so the user can review and optionally change data before re-submitting.
-- **The form submission handler must work identically** for a first submission and a re-submission — call the same endpoint, pass the same `uuid`, handle success/error the same way.
-- **On re-submission success**, update the persisted step data (localStorage) with the newly submitted values so the next back-navigation shows current data.
+Persisting Step 1's values isn't strictly required (there's no back-navigation), but it's still useful — e.g. so a mid-typing refresh before submit doesn't wipe the form. If you persist, use these helpers:
 
 ```javascript
-// Base pattern for Steps 1, 2, 3, 5, 6 — identical for first submission and re-submission.
-// ⚠️ Do NOT use this directly for Step 4 — Step 4 has its own complete handler in
-//    STEP4_OWNER_INFORMATION_IMPLEMENTATION.md (primary_contact delete logic, field lock,
-//    and disabled-field appending are all Step 4-specific).
-function submitStep(stepNumber, formElement, nextStepFn) {
-    const formData = new FormData(formElement);
-    formData.append('uuid', getSignupUuid());
-
-    // If any fields are disabled (e.g. a step-level read-only lock), their values are NOT
-    // included in FormData automatically — append them manually so the payload is complete.
-    // Exclude hidden inputs — they are never disabled and would be double-appended.
-    $(formElement).find('input:disabled:not([type="hidden"]), select:disabled, textarea:disabled')
-        .each(function() {
-            const name = $(this).attr('name');
-            if (!name) return;
-            const type = $(this).attr('type');
-            if (type === 'radio' || type === 'checkbox') {
-                if ($(this).is(':checked')) formData.append(name, $(this).val());
-            } else {
-                formData.append(name, $(this).val() || '');
-            }
-        });
-
-    $.ajax({
-        url: getStepUrl(stepNumber),
-        type: 'POST',
-        data: formData,
-        processData: false,
-        contentType: false,
-        success: function(response) {
-            if (response.status) {
-                saveStepData(stepNumber, formElement); // persist for back-navigation
-                nextStepFn();
-            }
-        },
-        error: function(xhr) {
-            const errors = xhr.responseJSON?.errors || {};
-            for (const [field, messages] of Object.entries(errors)) {
-                displayFieldError(field, messages[0]);
-            }
-        }
-    });
-}
-```
-
-⚠️ **Step 4**: Use the dedicated handler in [steps/STEP4_OWNER_INFORMATION_IMPLEMENTATION.md](steps/STEP4_OWNER_INFORMATION_IMPLEMENTATION.md) → "Form Submission". It handles the disabled-field append, primary_contact delete logic, and field lock in one complete, ordered block.
-
-### Form Data Persistence (Preventing Data Reset on Back Navigation)
-
-**All step field values must be saved so they are restored when the user navigates back to a previous step.** Without this, fields appear empty on revisit.
-
-**Save** field values on each step's successful API submission, before navigating forward:
-
-```javascript
-function saveStepData(step, formElement) {
+function saveStep1Data(formElement) {
     const data = {};
     $(formElement).find('input, select, textarea').each(function() {
         const name = $(this).attr('name');
@@ -326,15 +252,11 @@ function saveStepData(step, formElement) {
             data[name] = $(this).val();
         }
     });
-    localStorage.setItem(`signup_step_${step}_data`, JSON.stringify(data));
+    localStorage.setItem('signup_step_1_data', JSON.stringify(data));
 }
-```
 
-**Restore** saved values on each step's page load, before triggering conditional field logic:
-
-```javascript
-function restoreStepData(step, formElement) {
-    const saved = localStorage.getItem(`signup_step_${step}_data`);
+function restoreStep1Data(formElement) {
+    const saved = localStorage.getItem('signup_step_1_data');
     if (!saved) return;
     const data = JSON.parse(saved);
     Object.entries(data).forEach(([name, value]) => {
@@ -350,82 +272,53 @@ function restoreStepData(step, formElement) {
 }
 ```
 
-**After restoring, re-trigger conditional field logic** so dependent fields reflect the restored values:
+**After restoring, re-trigger the one conditional** (`business_state` visibility depends on `country`):
 
 ```javascript
 $(document).ready(function() {
-    restoreStepData(2, '#step2Form');
-
-    // Re-trigger conditional logic with restored values
-    $('#industry_type').trigger('change');
-    $('input[name="is_physical_address_same_as_legal_address"]:checked').trigger('change');
-    // etc. — trigger every field that controls dependent visibility
+    restoreStep1Data('#step1Form');
+    $('#country').trigger('change'); // show/hide + require business_state for US
 });
 ```
 
-**localStorage keys** (use consistently across all steps):
+**localStorage keys**:
 
 | Key | Contents |
 |-----|----------|
-| `signup_uuid` | UUID from Step 1 response |
-| `signup_step` | Current step number |
-| `signup_country` | Step 1 country code (for cross-step conditionals) |
-| `signup_step_1_data` | Step 1 field values |
-| `signup_step_2_data` | Step 2 field values |
-| `signup_step_3_data` | Step 3 field values |
-| `signup_step_4_data` | Step 4 field values |
-| `signup_step_5_data` | Step 5 field values |
-| `signup_step_6_data` | Step 6 field values |
-
-**Step 1 specifically** — restore data first, then apply the lock. Fields will be populated (visible) and disabled (not editable). See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Step Lock After Submission".
+| `signup_step_1_data` | Step 1 field values (optional refresh safety) |
+| `signup_completed` | `'true'` once Variant 2's submit + resume-email succeed (drives the confirmation view) |
 
 ### Field Format Rules
 
 | Field Type | Rule |
 |------------|------|
-| Date fields | Submit in `Y-m-d` format (e.g., `2026-07-30`) |
-| Phone fields | Must be a valid, correctly formatted phone number before submission |
-| Currency / amount fields | Always submit as an integer — no decimals, symbols, or commas |
+| Phone fields | Must be a valid, correctly formatted phone number before submission (E.164 from intl-tel-input) |
+| Currency / amount fields | `annual_sales` is submitted/forwarded as an integer — no decimals, symbols, or commas |
 
-### Keep the Selected Country From Step 1
+### The Step 1 Country
 
-`country` is collected **once**, on Step 1, and is never re-collected or shown as a dropdown on any later step. Steps 2–5 do not render a `#country` `<select>` — they read the persisted Step 1 value and use it to decide which dependent fields to show or hide.
-
-- **Persist the Step 1 `country` value** (server-side on the application/company record, and/or client-side alongside the `uuid`) so every later step can read it without re-asking the user.
-- **Do not bind a `change` handler to a `#country` element on Steps 2–5** — there isn't one. Evaluate the persisted value once when the step loads instead.
-- Use the **country code/slug** (`"US"`, `"CA"`, `"MX"`, ...) for every comparison — never the numeric `id`.
-
-Fields that depend on the persisted Step 1 country:
-
-| Step | Field(s) | Behavior |
-|------|----------|----------|
-| 2 | `business_register_number` | Shown/required only if `country ≠ "US"` |
-| 2 | `federal_tax_id` | Label and input mask vary by `country` |
-| 4 | `driver_license_state`, `driver_license_expiration_date` | Shown/required only if the **owner's** `country = "US"` (this is the owner's own address country from Step 4, not the Step 1 company country) |
-| 5 | `institution_number`, `customer_pay_currency` | Shown/required only if `country = "CA"` (Canada) |
-| 5 | `routing_number`, `account_number` | Label/format vary by `country` |
+`country` is a normal Step 1 dropdown. Its only in-form job is the one conditional — show/require `business_state` when `country = "US"`. Compare against the country **code/slug** (`"US"`, `"CA"`, ...), never the numeric `id`. In Variant 2 it's part of the signup payload; in Variant 1 it's collected but not forwarded to the redirect.
 
 ---
 
 ## Testing Checklist
 
-⚠️ **Never submit real requests to `base_url` to verify your work.** Every item below must be confirmed by reading the code, inspecting the request in browser devtools before sending, or intercepting/mocking the `fetch` calls — not by actually clicking through the live form and letting Steps 1-6 (or resume-link) hit the real API. `base_url` points at EMAP's real signup backend (production or staging), and every successful Step 1 submission creates a real, persisted merchant application record there. There is no sandbox/test mode for these endpoints, so "just submit it once to check it works" leaves behind a real test deal that someone else has to notice and clean up. If you genuinely need a live end-to-end submission (e.g. to confirm a payload shape against the real backend), ask the person you're building this for first and wait for them to explicitly confirm it's fine to create a real record — don't decide this on their behalf.
+⚠️ **Never submit real requests to `base_url` to verify your work.** For Variant 2, confirm every item by reading the code, inspecting the request in browser devtools before sending, or intercepting/mocking the `fetch` calls — not by letting `POST /api/v1/signup` or resume-link actually hit the real API. `base_url` points at EasyPayDirect's real signup backend (production or staging), and every successful signup submission creates a real, persisted merchant application record there. There is no sandbox/test mode, so "just submit it once to check it works" leaves behind a real test deal someone has to clean up. If you genuinely need a live submission, ask the person you're building this for first and wait for explicit confirmation — don't decide it on their behalf. (Variant 1 makes no API call, so its redirect can be safely exercised.)
 
-**Per-step**: dropdown data loads, required-field validation fires, conditional fields toggle correctly, submission succeeds and returns a `uuid`.
+**Both variants**:
+- [ ] Country and US-State dropdowns load with real `<option>` **values** (the `code`, not `undefined` or the numeric `id`) — check the actual value, not just that labels appear.
+- [ ] `business_state` appears (and is required) only when `country="US"`, hidden otherwise.
+- [ ] Required-field validation fires on all Step 1 fields before any handoff.
+- [ ] No "Step 1 of N" / multi-step progress signal is shown anywhere — there is exactly one step.
+- [ ] Phone submits/forwards as a valid E.164 value; `annual_sales` is an integer.
 
-⚠️ **"Dropdown data loads" means checking the actual `value` of a populated `<option>`, not just that labels appear.** `industry_type`, `referral_source`, `shopping_cart`, and `interest_details` are populated from a `slug` field, not `code`/`id` — a shared loader that assumes one field name across all API-backed dropdowns can render every option with `value="undefined"` while every label still looks correct, since labels come from `item.name`. This passes any check that only looks at the screen and only fails once the backend rejects the submitted value. See [reference/DROPDOWNS_REFERENCE.md § API-Based Dropdowns](reference/DROPDOWNS_REFERENCE.md#api-based-dropdowns) for the value field per endpoint.
+**Variant 1 (redirect)**:
+- [ ] On a valid submit the browser is sent to `https://emap.epd.dev/?...` with all 7 params present and URL-encoded.
+- [ ] `company_name` in the URL carries the value of the `name` field; no `form_id` is included; no API call is made.
 
-**Must pass before considering the form done**:
-- [ ] Step 1 → Step 6 completes end-to-end with a single persisted `uuid`
-- [ ] Physical address fields (Step 2) only required when `is_physical_address_same_as_legal_address=0`
-- [ ] `business_state` (Step 1) appears only when `country="US"`
-- [ ] Revenue model → subscription frequency → subscription frequency "Other" nested conditional (Step 2) works at both levels
-- [ ] Transaction entry slider (Step 3) only allows multiples of 5 and always sums to 100
-- [ ] Owner 2 section (Step 4) appears only when `ownership_percentage[1] < 51`
-- [ ] Owner 1 `first_name[1]`/`last_name[1]`/`email[1]` are omitted from submission when `primary_contact=1` (see [steps/STEP4_OWNER_INFORMATION.md](steps/STEP4_OWNER_INFORMATION.md))
-- [ ] Owner `license` (Step 4) is always required, all countries; `driver_license_state`/`driver_license_expiration_date` required only when owner `country="US"`, hidden otherwise
-- [ ] Page refresh resumes on the current step (not reset to Step 1)
-- [ ] Page refresh **after** completing Step 6 shows the success view, not Step 6's form again
-- [ ] The success view has a "Sign up again" action that clears all persisted signup state and returns to a blank Step 1
-- [ ] 422 responses display field errors without changing step/URL
-- [ ] All 6 steps and all dropdown endpoints work with no auth header sent at all (only Step 1 optionally accepts one for partner attribution)
+**Variant 2 (resume email)**:
+- [ ] On a valid submit, `POST /api/v1/signup` includes `step_count:1` (and `partner_key` only if supplied), then `POST /api/v1/signup/resume-link` is called automatically with the same email — no second click, no re-entering the email.
+- [ ] After success the "check your email" confirmation view is shown and `signup_completed` is persisted.
+- [ ] A page refresh after completion shows the confirmation view, not the Step 1 form.
+- [ ] 422 responses display field errors without changing the URL.
+- [ ] Both API calls go through `fetchWithRetry` and work with no auth header (signup optionally accepts `partner_key` in the body for attribution).

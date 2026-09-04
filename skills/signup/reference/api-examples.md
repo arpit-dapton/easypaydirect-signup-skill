@@ -1,33 +1,31 @@
 # API Implementation Examples
 
-Ready-to-use code examples for all API calls in the signup form.
+Ready-to-use code for the Step-1-only signup form and its two handoff variants.
 
 ---
 
 ## Authentication
 
-⚠️ **None of these endpoints require authentication.** Do not send `X-API-Key` or `Authorization` headers to any dropdown or form-submission endpoint.
+⚠️ **None of these endpoints require authentication.** Do not send `X-API-Key` or `Authorization` headers to the dropdown endpoints, to `POST /api/v1/signup`, or to `POST /api/v1/signup/resume-link`.
 
-The one exception: Step 1 accepts an **optional `partner_key` field in the payload body** (not a header) for non-blocking partner attribution. Ask the implementer whether they have a partner API key before including it — see [skill.md](../skill.md) → "MANDATORY FIRST STEP" (top of file).
+The one exception: `POST /api/v1/signup` accepts an **optional `partner_key` field in the payload body** (not a header) for non-blocking partner attribution. Ask the implementer whether they have a partner API key before including it — see [skill.md](../SKILL.md) → "MANDATORY FIRST STEP". `partner_key` is only ever sent in Variant 2 (Variant 1 makes no API call).
 
 ---
 
 ## Dropdown APIs
 
-### Load Countries (Example 1)
+Step 1 has exactly two dropdowns — Countries and US States. Both use the `code` field as the option value (see [DROPDOWNS_REFERENCE.md](DROPDOWNS_REFERENCE.md)).
+
+### Load Countries
 
 **JavaScript**:
 ```javascript
 async function loadCountries() {
   try {
     const response = await fetch('https://emap.epd.dev/api/partner/countries');
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const result = await response.json();
-    return result.data;  // [{name: "US", code: "US"}, ...]
+    return result.data;  // [{name: "United States", code: "US"}, ...]
   } catch (error) {
     console.error('Failed to load countries:', error);
     return [];
@@ -39,7 +37,7 @@ const countries = await loadCountries();
 const countrySelect = document.querySelector('select[name="country"]');
 countries.forEach(country => {
   const option = document.createElement('option');
-  option.value = country.code;
+  option.value = country.code;         // use code, not id
   option.textContent = country.name;
   countrySelect.appendChild(option);
 });
@@ -61,17 +59,9 @@ curl -X GET "https://emap.epd.dev/api/partner/countries" \
 # }
 ```
 
-### Load Industry Types
+### Load States
 
-```javascript
-async function loadIndustries() {
-  const response = await fetch('https://emap.epd.dev/api/partner/industry-types');
-  const result = await response.json();
-  return result.data;  // [{name: "Retail", slug: "retail"}, ...]
-}
-```
-
-### Load States (Step 2)
+States populate the `business_state` dropdown, which is shown/required only when `country = "US"`.
 
 ```javascript
 async function loadStates() {
@@ -81,272 +71,130 @@ async function loadStates() {
 }
 ```
 
-### Load Other Dropdowns
+---
 
-Same pattern for all dropdown endpoints:
+## Step 1 form values
+
+Both variants read the same Step 1 fields off the form. Collect them once:
 
 ```javascript
-// Referral Sources
-fetch('https://emap.epd.dev/api/partner/referral-sources')
-
-// Shopping Carts / Transaction Devices
-fetch('https://emap.epd.dev/api/partner/shopping-carts')
-
-// Interest Details
-fetch('https://emap.epd.dev/api/partner/interest-details')
+function readStep1(form) {
+  return {
+    first_name:     form.querySelector('[name="first_name"]').value,
+    last_name:      form.querySelector('[name="last_name"]').value,
+    email:          form.querySelector('[name="email"]').value,
+    phone:          form.querySelector('[name="phone"]').value,      // E.164, e.g. +12015551234
+    name:           form.querySelector('[name="name"]').value,        // company name
+    website:        form.querySelector('[name="website"]').value,
+    country:        form.querySelector('[name="country"]').value,     // code, e.g. "US"
+    annual_sales:   form.querySelector('[name="annual_sales"]').value,
+    business_state: form.querySelector('[name="business_state"]')?.value || '',
+    promo_code:     form.querySelector('[name="promo_code"]')?.value || ''
+  };
+}
 ```
 
 ---
 
-## Form Submission APIs
+## Variant 1 — redirect to EasyPayDirect (no API call)
 
-### Step 1: Submit Account Information
+Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to it. Only 7 fields are forwarded; `company_name` maps to the `name` field. No `form_id`, no API request.
 
-**JavaScript**:
 ```javascript
-async function submitStep1(formData) {
-  try {
-    const payload = {
-      first_name: formData.firstName,
-      last_name: formData.lastName,
-      email: formData.email,
-      phone: formData.phone,
-      name: formData.companyName,
-      website: formData.website,
-      country: formData.country,
-      annual_sales: parseInt(formData.annualSales),
-      business_state: formData.businessState || null,
-      step_count: 1
-    };
-
-    // OPTIONAL: only include partner_key if the implementer has a partner API key
-    // (ask them first — see skill.md → "MANDATORY FIRST STEP" (top of file)). Omit the
-    // field entirely if they don't have one; do not send an empty string.
-    if (formData.partnerKey) {
-      payload.partner_key = formData.partnerKey;
-    }
-
-    const response = await fetch('https://emap.epd.dev/api/v1/signup', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (response.status === 200) {
-      // ✅ Success
-      const result = await response.json();
-      console.log('Account created!');
-      console.log('UUID:', result.uuid);
-
-      // Persist the uuid for future steps (storage mechanism is your choice)
-
-      // Navigate to Step 2
-      window.location.href = `/step/2/${result.uuid}`;
-
-      return result;
-
-    } else if (response.status === 422) {
-      // ❌ Validation errors
-      const error = await response.json();
-      console.error('Validation errors:', error.errors);
-
-      // Display field-level errors
-      Object.entries(error.errors).forEach(([field, messages]) => {
-        const input = document.querySelector(`[name="${field}"]`);
-        if (input) {
-          input.classList.add('is-invalid');
-          const errorEl = input.parentElement.querySelector('.error-text');
-          if (errorEl) {
-            errorEl.textContent = messages[0];
-          }
-        }
-      });
-      return null;
-
-    } else {
-      // ❌ Other error (400 bad request, 403 blocked region, etc.)
-      const error = await response.json();
-      console.error('Error:', error.message);
-      return null;
-    }
-  } catch (error) {
-    console.error('Network error:', error);
-    alert('Network error. Please try again.');
-    return null;
-  }
+function redirectToEmap(step1) {
+  const params = new URLSearchParams({
+    first_name:   step1.first_name,
+    last_name:    step1.last_name,
+    company_name: step1.name,          // company-name field is `name`
+    phone:        step1.phone,         // '+' is encoded to %2B automatically
+    email:        step1.email,
+    annual_sales: step1.annual_sales,
+    website:      step1.website
+  });
+  window.location.href = `https://emap.epd.dev/?${params.toString()}`;
 }
 
 // Usage
-document.getElementById('signupForm').addEventListener('submit', async (e) => {
+document.getElementById('signupForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  
-  const formData = {
-    firstName: document.querySelector('[name="first_name"]').value,
-    lastName: document.querySelector('[name="last_name"]').value,
-    email: document.querySelector('[name="email"]').value,
-    phone: document.querySelector('[name="phone"]').value,
-    companyName: document.querySelector('[name="name"]').value,
-    website: document.querySelector('[name="website"]').value,
-    country: document.querySelector('[name="country"]').value,
-    annualSales: document.querySelector('[name="annual_sales"]').value,
-    businessState: document.querySelector('[name="business_state"]')?.value
-  };
-  
-  const result = await submitStep1(formData);
-  if (result) {
-    console.log('Proceeding to Step 2...');
-  }
+  if (!validateStep1()) return;        // run the same field validation as always
+  redirectToEmap(readStep1(e.target));
 });
 ```
 
-**cURL**:
+`URLSearchParams` handles encoding, so `phone: "+12015551234"` becomes `phone=%2B12015551234` and `name: "John Company"` becomes `company_name=John+Company`.
+
+---
+
+## Variant 2 — submit Step 1, then email a resume link
+
+Submit to `POST /api/v1/signup`, then on success call `POST /api/v1/signup/resume-link` with the merchant's email, then show a "check your email" view. Use `fetchWithRetry` (see [skill.md § Network Resilience](../SKILL.md#network-resilience--retry-once-on-transient-fetch-failure)) for both calls.
+
+```javascript
+async function submitVariant2(step1, partnerKey) {
+  const payload = {
+    first_name: step1.first_name,
+    last_name: step1.last_name,
+    email: step1.email,
+    phone: step1.phone,
+    name: step1.name,
+    website: step1.website,
+    country: step1.country,
+    annual_sales: parseInt(step1.annual_sales, 10),
+    business_state: step1.business_state || null,
+    step_count: 1
+  };
+  // OPTIONAL: only if the implementer supplied a partner key (see skill.md → MANDATORY FIRST STEP)
+  if (partnerKey) payload.partner_key = partnerKey;
+
+  // 1. Create the application
+  const signup = await fetchWithRetry('https://emap.epd.dev/api/v1/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!signup.body.status) {
+    // 422 → field errors in signup.body.errors; 200 status:false → "Company already exists"
+    handleSignupError(signup);
+    return;
+  }
+
+  // 2. Email the resume link (endpoint does an email lookup — needs the app created above)
+  await fetchWithRetry('https://emap.epd.dev/api/v1/signup/resume-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ email: step1.email })
+  });
+
+  // 3. Persist completion and show the confirmation view (see skill.md → Page Refresh Behavior)
+  localStorage.setItem('signup_completed', 'true');
+  showCheckYourEmailView(step1.email);
+}
+```
+
+**cURL — the two calls**:
 ```bash
 curl -X POST "https://emap.epd.dev/api/v1/signup" \
   -H "Content-Type: application/json" \
   -d '{
-    "first_name": "John",
-    "last_name": "Doe",
-    "email": "john@example.com",
-    "phone": "+1-555-1234",
-    "name": "Acme Corp",
-    "website": "https://acme.com",
-    "country": "US",
-    "annual_sales": 500000,
-    "business_state": "CA",
-    "step_count": 1,
-    "partner_key": "OPTIONAL — only if the implementer has one, omit otherwise"
+    "first_name": "John", "last_name": "Doe", "email": "john@example.com",
+    "phone": "+12015551234", "name": "Acme Corp", "website": "https://acme.com",
+    "country": "US", "annual_sales": 500000, "business_state": "CA", "step_count": 1
   }'
+# Success (200): { "status": true, "uuid": "...", "step_count": 1, "message": "Account created successfully" }
 
-# Success Response (200):
-# {
-#   "success": true,
-#   "uuid": "550e8400-e29b-41d4-a716-446655440000",
-#   "step_count": 1,
-#   "message": "Account created successfully"
-# }
-```
-
-### Step 2: Submit Company Information
-
-**JavaScript**:
-```javascript
-async function submitStep2(step2Data, uuid) {
-  const payload = {
-    step_count: 2,
-    uuid: uuid,
-    section: "company_info",
-    legal_name: step2Data.legalName,
-    name: step2Data.dbaName,
-    industry_type: step2Data.industryType,
-    customer_service_telephone_number: step2Data.customerServicePhone,
-    business_location: step2Data.businessLocation,
-    business_formed: step2Data.businessFormed,
-    business_organized: step2Data.businessOrganized,
-    federal_tax_id: step2Data.federalTaxId,
-    business_register_number: step2Data.businessRegisterNumber || null,
-    // ... other Step 2 fields
-    is_physical_address_same_as_legal_address: step2Data.sameAddress ? 0 : 1
-  };
-
-  const response = await fetch('https://emap.epd.dev/api/v1/application/step', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (response.ok) {
-    const result = await response.json();
-    window.location.href = result.next_step_url;
-    return result;
-  } else {
-    const error = await response.json();
-    console.error('Error:', error.errors || error.message);
-    return null;
-  }
-}
-```
-
-### Steps 3-6: Same Pattern
-
-All steps use the same endpoint:
-
-```javascript
-async function submitStep(stepNumber, sectionName, stepData, uuid) {
-  const payload = {
-    step_count: stepNumber,
-    uuid: uuid,
-    section: sectionName,  // "product_info", "ownership_info", "banking_info", "interest_details"
-    ...stepData
-  };
-
-  const response = await fetch('https://emap.epd.dev/api/v1/application/step', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (response.ok) {
-    const result = await response.json();
-    if (result.next_step_url) {
-      window.location.href = result.next_step_url;
-    } else if (result.redirect) {
-      window.location.href = result.redirect;  // Step 6 redirects to the success page
-    }
-    return result;
-  } else {
-    const error = await response.json();
-    console.error('Error:', error.errors || error.message);
-    return null;
-  }
-}
-
-// Usage
-await submitStep(3, 'product_info', {
-  card_swiped: 0,
-  customer_entered: 100,
-  staff_entered: 0,
-  average_transaction_amount: 200,
-  highest_transaction_amount: 1000,
-  describe_services: "...",
-  describe_highest_transaction: "..."
-}, uuid);
-```
-
----
-
-## Complete Flow Example
-
-```javascript
-// 1. Step 1 - Load dropdown
-const countries = await loadCountries();
-
-// 2. Step 1 - Submit form
-const step1Result = await submitStep1(formData);
-// Result: returns uuid — persist it however your implementation prefers
-
-// 3. Step 2 - Load dropdowns
-const industries = await loadIndustries();
-
-// 4. Step 2 - Submit form
-const step2Result = await submitStep(2, 'company_info', formData, step1Result.uuid);
-
-// ... repeat for Steps 3-6
-
-// Final: Step 6 redirects to the success page
+curl -X POST "https://emap.epd.dev/api/v1/signup/resume-link" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "john@example.com" }'
+# Success (200): { "status": true, "message": "Resume link sent" }
 ```
 
 ---
 
 ## Error Handling
 
-See [skill.md](../skill.md) → Error Handling for status codes, response shapes, and a worked `handleStepResponse()` example.
+See [skill.md](../SKILL.md) → Error Handling for status codes, response shapes, and a worked `handleStepResponse()` example. The relevant codes here are 200 (incl. the 200 `status:false` "Company already exists" case), 400, 403, 422, and 429 (resume-link rate limit).
 
 ---
 
@@ -356,12 +204,10 @@ See [skill.md](../skill.md) → Error Handling for status codes, response shapes
 // Dropdown fetch
 const response = await fetch('https://emap.epd.dev/api/partner/{ENDPOINT}');
 
-// Form submission
+// Form submission (Variant 2)
 const response = await fetch('https://emap.epd.dev/api/v1/{ENDPOINT}', {
   method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(payload)
 });
 ```
