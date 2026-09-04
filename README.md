@@ -2,6 +2,10 @@
 
 A ready-to-use AI agent skill for building the EasyPayDirect merchant signup form.
 
+## Purpose
+
+This skill is for **partners** who want to earn commission by referring merchants to EasyPayDirect. Give it to your AI agent and it builds a branded referral signup page that you can host anywhere (Vercel, Netlify, your own site, etc.). Every merchant who signs up through your page is attributed to you via your partner key, so the signups you drive earn you commission.
+
 ## Installation
 
 **1. Get the skill**
@@ -40,7 +44,7 @@ path/to/signup/SKILL.md
 
 Before it writes any code, the skill stops and asks:
 
-1. *Do you have a partner API key?* Determines whether `partner_key` gets sent in the signup payload (email variant only).
+1. *Do you have a partner API key?* Determines whether `partner_key` gets sent in the signup payload (email variant only). You get the key from the [EasyPayDirect partner portal](https://emap.easypaydirect.com) under **Integration → API Integration** — one key per partner account, reused for every signup. Not a partner yet? [Register as a partner](https://emap.easypaydirect.com/signup/partner) first, then grab the key from that same page. (The skill walks you through this step by step and lets you **Skip** if you don't have one yet — signups just won't be attributed to you until you add it.)
 2. *How do you want the sign-up process to work for merchants on your site?* Asked in plain language, no internal jargon. Either way, your site builds **only** the short Step 1 form — the merchant finishes on EasyPayDirect. The two options:
 
    1. **Quick start, then continue on EasyPayDirect**: the merchant enters their basic contact info on your website. As soon as they submit, they're taken straight to EasyPayDirect's own website to finish the rest of their application. *(Internally: Variant 1 — build only Step 1, make no API call, and redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params.)*
