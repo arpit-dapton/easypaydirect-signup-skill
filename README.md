@@ -1,6 +1,6 @@
-# EMAP Signup Skills
+# EasyPayDirect Signup Skills
 
-A ready-to-use AI agent skill for building the EMAP merchant signup form.
+A ready-to-use AI agent skill for building the EasyPayDirect merchant signup form.
 
 ## Installation
 
@@ -41,12 +41,12 @@ path/to/signup/SKILL.md
 Before it writes any code, the skill stops and asks:
 
 1. *Do you have a partner API key?* Determines whether `partner_key` gets sent in the signup payload (email variant only).
-2. *How do you want the sign-up process to work for merchants on your site?* Asked in plain language, no internal jargon. Either way, your site builds **only** the short Step 1 form — the merchant finishes on EMAP. The two options:
+2. *How do you want the sign-up process to work for merchants on your site?* Asked in plain language, no internal jargon. Either way, your site builds **only** the short Step 1 form — the merchant finishes on EasyPayDirect. The two options:
 
-   1. **Quick start, then continue on EMAP**: the merchant enters their basic contact info on your website. As soon as they submit, they're taken straight to EMAP's own website to finish the rest of their application. *(Internally: Variant 1 — build only Step 1, make no API call, and redirect the browser to EMAP's hosted signup with the Step 1 values as query params.)*
-   2. **Quick start, then we email you a link**: the merchant enters their basic contact info on your website, and instead of being redirected, they get an email with a link to continue on EMAP whenever they're ready. *(Internally: Variant 2 — build only Step 1, `POST /api/v1/signup`, then `POST /api/v1/signup/resume-link`, then show a "check your email" confirmation.)*
+   1. **Quick start, then continue on EasyPayDirect**: the merchant enters their basic contact info on your website. As soon as they submit, they're taken straight to EasyPayDirect's own website to finish the rest of their application. *(Internally: Variant 1 — build only Step 1, make no API call, and redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params.)*
+   2. **Quick start, then we email you a link**: the merchant enters their basic contact info on your website, and instead of being redirected, they get an email with a link to continue on EasyPayDirect whenever they're ready. *(Internally: Variant 2 — build only Step 1, `POST /api/v1/signup`, then `POST /api/v1/signup/resume-link`, then show a "check your email" confirmation.)*
 
-These aren't optional: they're one-way doors (a signup submitted without `partner_key` can never be attributed to a partner after the fact, and the flow choice determines how the merchant is handed off to EMAP), so the skill is written to refuse to proceed until a human actually answers. See the gate question and its full implementation table in [`skills/signup/SKILL.md`](skills/signup/SKILL.md).
+These aren't optional: they're one-way doors (a signup submitted without `partner_key` can never be attributed to a partner after the fact, and the flow choice determines how the merchant is handed off to EasyPayDirect), so the skill is written to refuse to proceed until a human actually answers. See the gate question and its full implementation table in [`skills/signup/SKILL.md`](skills/signup/SKILL.md).
 
 ## Folder Structure
 
@@ -72,7 +72,7 @@ This is the flat layout the `npx skills` CLI expects (`skills/<name>/SKILL.md`),
 
 | Skill | Entry point |
 |-------|-------------|
-| EMAP Merchant Signup | [`skills/signup/SKILL.md`](skills/signup/SKILL.md) |
+| EasyPayDirect Merchant Signup | [`skills/signup/SKILL.md`](skills/signup/SKILL.md) |
 
 ---
 
