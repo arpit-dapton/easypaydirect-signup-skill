@@ -8,9 +8,19 @@ This skill is for **partners** who want to earn commission by referring merchant
 
 ## Installation
 
+**What you'll need**
+
+- **A partner API key (optional)** — from the [EasyPayDirect partner portal](https://emap.easypaydirect.com) (see [Answer the Gate Questions](#answer-the-gate-questions) below). It's what attributes signups to you for commission, but you can start without it and add it later.
+- **An AI coding assistant** (Cursor, Claude Code, ChatGPT, etc.) — this is what actually builds the page from the skill.
+- **Node.js** — only for the `npx` install method below; not needed if you copy the skill manually. Get it at [nodejs.org](https://nodejs.org).
+
+> Not comfortable with a terminal? You can skip the commands entirely — open your AI assistant, give it the skill (paste the link to `SKILL.md`), and ask it to build the page for you.
+
 **1. Get the skill**
 
 *Option A: `npx skills` (recommended)*
+
+> **Before you run this, you need Node.js installed** — it's what provides the `npx` command. Download it from [nodejs.org](https://nodejs.org) (pick the "LTS" version and click through the installer), then reopen your terminal. To check it worked, run `node --version`; if it prints a version number you're set. If `npx` still isn't found after installing, close and reopen the terminal.
 
 ```bash
 npx skills add arpit-dapton/easypaydirect-signup-skill
@@ -22,14 +32,13 @@ This is the [open agent skills CLI](https://skills.sh): it detects which coding 
 npx skills add arpit-dapton/easypaydirect-signup-skill --list
 ```
 
-*Option B: copy it manually*
+*Option B: download it (no terminal needed)*
 
-```bash
-git clone https://github.com/arpit-dapton/easypaydirect-signup-skill.git easypaydirect-signup-skill
-cp -r easypaydirect-signup-skill/skills/signup <your-agent's-skills-dir>/signup
-```
+1. Open the [GitHub repo](https://github.com/arpit-dapton/easypaydirect-signup-skill).
+2. Click the green **Code** button → **Download ZIP**, then unzip it.
+3. The skill is the `skills/signup` folder inside. Point your agent at it (next step), or drop that folder wherever your agent reads skills from.
 
-(Where that is depends on your agent: see the CLI's [Supported Agents](https://github.com/vercel-labs/skills#supported-agents) table for the exact path. Any folder your agent can read works, even outside that convention.)
+Any folder your agent can read works. If you're not sure where that is for your agent, just use the [Answer the Gate Questions](#answer-the-gate-questions) step below — you can hand the agent the `SKILL.md` file directly.
 
 **2. Point your agent at it**
 
