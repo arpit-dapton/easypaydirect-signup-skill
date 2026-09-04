@@ -187,18 +187,28 @@ Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to i
 const params = new URLSearchParams({
     first_name:    $('[name="first_name"]').val(),
     last_name:     $('[name="last_name"]').val(),
-    company_name:  $('[name="name"]').val(),         // company-name field is `name`
-    phone:         $('[name="phone"]').val(),         // E.164; '+' becomes %2B
+    company_name:  $('[name="name"]').val(),          // company-name field is `name`
+    phone:         $('[name="phone"]').val(),          // E.164; '+' becomes %2B
     email:         $('[name="email"]').val(),
     annual_sales:  $('[name="annual_sales"]').val(),
     website:       $('[name="website"]').val(),
-    industry_type: $('[name="industry_type"]').val()  // the industry NAME, e.g. "Retail"
+    country:       $('[name="country"] option:selected').text().trim(), // the country NAME (e.g. "United States"), not the code — /signup resolves country by name
+    industry_type: $('[name="industry_type"]').val()   // the industry NAME, e.g. "Retail"
 });
 // If the merchant picked "Other", forward their free-text industry too.
 const industryOther = $('[name="industry_type_other"]').val();
 if ($('[name="industry_type"]').val() === 'Other' && industryOther) {
     params.set('industry_type_other', industryOther);
 }
+// US state — forward the 2-letter code when present (/signup resolves it to the state id).
+const businessState = $('[name="business_state"]').val();
+if (businessState) params.set('business_state', businessState);
+// Optional referral code — forward only when provided.
+const promoCode = $('[name="promo_code"]').val();
+if (promoCode) params.set('promo_code', promoCode);
+// Partner attribution — forward the partner key as `secretKey` so EasyPayDirect records
+// partner_id on the created application. Only if the implementer supplied a partner key.
+if (PARTNER_KEY) params.set('secretKey', PARTNER_KEY);
 // BASE_URL is the single configured host (see reference/api-examples.md → "Configuration").
 window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 ```

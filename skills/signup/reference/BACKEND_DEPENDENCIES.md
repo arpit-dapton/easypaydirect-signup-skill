@@ -16,16 +16,19 @@ Both variants build only Step 1 on the partner's site. They differ only in what 
 Variant 1 makes **no API call at all**. After the merchant fills Step 1, redirect the browser to EasyPayDirect's hosted-signup `/signup` page with the Step 1 values as query params — that page prefills its own form from them:
 
 ```
-{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&industry_type={industry_type}
+{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&country={country_name}&industry_type={industry_type}&business_state={state_code}
 ```
 
 - **URL-encode every value** with `encodeURIComponent`. The E.164 phone's leading `+` becomes `%2B`.
 - **`company_name` maps to the Step 1 field named `name`** (the company-name field is `name`, not `company_name`).
+- **`country` is the country's display name** (e.g. `United States`), not the `code` — the `/signup` page resolves country by name (`getCountryID`), so forward the selected option's label, not its `US`-style value.
 - **`industry_type` is the industry's display name** (e.g. `Retail`), not the slug — the `/signup` page resolves the industry by name. If the merchant picked "Other", also append `&industry_type_other={free text}`.
-- `country`, `business_state`, `promo_code`, and `partner_key` are still collected on the form but are not part of the redirect.
+- **`promo_code`** — append `&promo_code={code}` when the merchant entered one (optional).
+- **Partner attribution** — append `&secretKey={partner_key}` when the implementer supplied a partner key. `/signup` resolves the key to the partner (`security_key` lookup) and records `partner_id` on the created application. This is the redirect variant's equivalent of Variant 2's `partner_key` payload field.
+- **`business_state`** — append `&business_state={code}` (the 2-letter state code, e.g. `CA`) when the merchant is in the US. `/signup` resolves it to the state id (`getStateId`). It also drives the in-form state conditional. Omit for non-US merchants.
 - No `form_id` is sent — it is not required for this flow.
 
-Because nothing is submitted to `/api/v1/signup`, there is no `uuid`, no persisted application, and no partner attribution in this variant.
+Because nothing is submitted to `/api/v1/signup`, there is no `uuid` and no persisted application **on the partner's side** at redirect time. Partner attribution, however, *is* preserved: the `secretKey` param carries the partner key through to the application EasyPayDirect creates when the merchant completes `/signup`.
 
 ---
 
@@ -64,5 +67,5 @@ Unauthenticated. Call it immediately after the signup POST succeeds, with the sa
 
 | Variant | What it needs from EasyPayDirect |
 |---|---|
-| 1 (redirect) | Nothing — client-side redirect to `{base_url}/signup?...` with the mapped query params (incl. `industry_type` as the industry name) |
+| 1 (redirect) | Nothing to call — client-side redirect to `{base_url}/signup?...` with the mapped query params (`country` and `industry_type` as **names**, `business_state` as the 2-letter code for US merchants, `promo_code` when present, and `secretKey` for partner attribution) |
 | 2 (resume email) | `POST /api/v1/signup` (with `step_count:1`), then `POST /api/v1/signup/resume-link` with the email |

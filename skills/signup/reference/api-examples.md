@@ -25,7 +25,9 @@ BASE_URL="https://emap.epd.dev"
 
 ⚠️ **None of these endpoints require authentication.** Do not send `X-API-Key` or `Authorization` headers to the dropdown endpoints, to `POST /api/v1/signup`, or to `POST /api/v1/signup/resume-link`.
 
-The one exception: `POST /api/v1/signup` accepts an **optional `partner_key` field in the payload body** (not a header) for non-blocking partner attribution. Ask the implementer whether they have a partner API key before including it — see [skill.md](../SKILL.md) → "MANDATORY FIRST STEP". `partner_key` is only ever sent in Variant 2 (Variant 1 makes no API call).
+The one exception is partner attribution, and it is **not** authentication — signup succeeds with or without it. Ask the implementer whether they have a partner API key before including it — see [skill.md](../SKILL.md) → "MANDATORY FIRST STEP". The same key is carried differently by each variant:
+- **Variant 2** sends it as an **optional `partner_key` field in the payload body** (not a header) of `POST /api/v1/signup`.
+- **Variant 1** (redirect, no API call) forwards the same key as a **`secretKey` query param** on the `/signup` redirect — EasyPayDirect resolves it to the partner and records `partner_id` on the created application.
 
 ---
 
@@ -133,7 +135,8 @@ function readStep1(form) {
     phone:          form.querySelector('[name="phone"]').value,      // E.164, e.g. +12015551234
     name:           form.querySelector('[name="name"]').value,        // company name
     website:        form.querySelector('[name="website"]').value,
-    country:        form.querySelector('[name="country"]').value,     // code, e.g. "US"
+    country:        form.querySelector('[name="country"]').value,     // code, e.g. "US" (Variant 2 payload)
+    country_name:   form.querySelector('[name="country"] option:selected')?.textContent.trim() || '', // NAME, e.g. "United States" (Variant 1 redirect)
     annual_sales:   form.querySelector('[name="annual_sales"]').value,
     industry_type:  form.querySelector('[name="industry_type"]').value, // the NAME, e.g. "Retail"
     industry_type_other: form.querySelector('[name="industry_type_other"]')?.value || '',
@@ -147,32 +150,40 @@ function readStep1(form) {
 
 ## Variant 1 — redirect to EasyPayDirect (no API call)
 
-Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to the `/signup` page, which prefills its own form from the query params. `company_name` maps to the `name` field; `industry_type` carries the industry **name**. No `form_id`, no API request.
+Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to the `/signup` page, which prefills its own form from the query params. `company_name` maps to the `name` field; `industry_type` carries the industry **name**; `country` carries the country **name** (not the code — `/signup` resolves country by name). Forward `business_state` (the 2-letter code) when the merchant is in the US, `promo_code` when present, and the partner key as `secretKey` so the created application is attributed to the partner. No `form_id`, no API request.
 
 ```javascript
-function redirectToEmap(step1) {
+function redirectToEmap(step1, partnerKey) {
   const params = new URLSearchParams({
     first_name:    step1.first_name,
     last_name:     step1.last_name,
-    company_name:  step1.name,          // company-name field is `name`
-    phone:         step1.phone,         // '+' is encoded to %2B automatically
+    company_name:  step1.name,           // company-name field is `name`
+    phone:         step1.phone,          // '+' is encoded to %2B automatically
     email:         step1.email,
     annual_sales:  step1.annual_sales,
     website:       step1.website,
-    industry_type: step1.industry_type  // the industry NAME, e.g. "Retail"
+    country:       step1.country_name,   // the country NAME (e.g. "United States") — /signup resolves country by name, not code
+    industry_type: step1.industry_type   // the industry NAME, e.g. "Retail"
   });
   // If the merchant picked "Other", forward their free-text industry too.
   if (step1.industry_type === 'Other' && step1.industry_type_other) {
     params.set('industry_type_other', step1.industry_type_other);
   }
+  // US state — forward the 2-letter code when present (/signup resolves it to the state id).
+  if (step1.business_state) params.set('business_state', step1.business_state);
+  // Optional referral code — forward only when provided.
+  if (step1.promo_code) params.set('promo_code', step1.promo_code);
+  // Partner attribution — forward the partner key as `secretKey` so EasyPayDirect records
+  // partner_id on the created application. Only when the implementer supplied a partner key.
+  if (partnerKey) params.set('secretKey', partnerKey);
   window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 }
 
-// Usage
+// Usage — PARTNER_KEY is the configured partner key ('' or undefined if none)
 document.getElementById('signupForm').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!validateStep1()) return;        // run the same field validation as always
-  redirectToEmap(readStep1(e.target));
+  redirectToEmap(readStep1(e.target), PARTNER_KEY);
 });
 ```
 
@@ -203,6 +214,8 @@ async function submitVariant2(step1, partnerKey) {
   if (step1.industry_type === 'Other' && step1.industry_type_other) {
     payload.industry_type_other = step1.industry_type_other;
   }
+  // Optional referral code — include only when the merchant entered one
+  if (step1.promo_code) payload.promo_code = step1.promo_code;
   // OPTIONAL: only if the implementer supplied a partner key (see skill.md → MANDATORY FIRST STEP)
   if (partnerKey) payload.partner_key = partnerKey;
 
