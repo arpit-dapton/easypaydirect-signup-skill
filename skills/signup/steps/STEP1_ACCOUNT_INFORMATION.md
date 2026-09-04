@@ -5,7 +5,12 @@ description: Step 1 Account Information - First step of merchant signup with bas
 
 # STEP 1: Account Information
 
-First step of the 6-step signup form. Collects basic merchant contact and company information.
+The only step built on the partner's site. Collects basic merchant contact and company information, then hands the merchant off to EasyPayDirect by one of two variants (see skill.md → "MANDATORY SECOND STEP"):
+
+- **Variant 1 (redirect)** — no API call; redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params.
+- **Variant 2 (resume email)** — `POST /api/v1/signup`, then `POST /api/v1/signup/resume-link` so the merchant is emailed a link to continue on EasyPayDirect.
+
+The form and its fields/validation are identical for both variants; only the submit action differs.
 
 ---
 
@@ -24,7 +29,7 @@ First step of the 6-step signup form. Collects basic merchant contact and compan
 | annual_sales | number | Yes | Numeric only, no currency symbols or commas |
 | promo_code | text | No | Optional referral code |
 | partner_key | text | No | Optional partner API key for attribution — see skill.md → "MANDATORY FIRST STEP" (top of file). Ask the implementer if they have one before including it; omit entirely if not |
-| step_count | — | **Yes** | Not a form field — always send the literal value `1` in the payload (not user-editable). Without it, the backend never records the application as having reached step 1, which breaks any later resume/redirect back into EMAP (it lands on Step 1 again instead of Step 2, even though Step 1 data is already saved). |
+| step_count | — | **Yes (Variant 2 only)** | Not a form field — in the Variant 2 signup payload, always send the literal value `1` (not user-editable). Without it, the backend never records the application as having reached step 1, so the emailed resume link lands the merchant back at the start instead of past Step 1. Variant 1 sends no payload, so `step_count` does not apply there. |
 
 ---
 
@@ -90,7 +95,7 @@ GET /api/partner/countries
 GET /api/partner/states
 ```
 
-**Form Submission**:
+**Form Submission** (Variant 2 only — Variant 1 makes no API call, see "Form Submission & Handoff" below):
 ```
 POST /api/v1/signup
 Headers: None required.
@@ -103,6 +108,8 @@ Payload:
                 not authentication — signup succeeds even if omitted or invalid.)
 Response: { uuid, step_count, message }
 ```
+
+Then, on success, `POST /api/v1/signup/resume-link` with `{ "email": "<the merchant's email>" }` to email the resume link. See [reference/BACKEND_DEPENDENCIES.md](../reference/BACKEND_DEPENDENCIES.md).
 
 ---
 
@@ -124,9 +131,33 @@ Response: { uuid, step_count, message }
 
 ---
 
-## Form Submission & Redirect
+## Form Submission & Handoff
 
-**On Success (HTTP 200/201)**:
+The field validation is identical for both variants. What happens after a valid submit depends on the variant chosen at the flow gate (skill.md → "MANDATORY SECOND STEP").
+
+### Variant 1 — redirect (no API call)
+
+Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to it. Only 7 fields are forwarded; `company_name` maps to the field named `name`; no `form_id`. Encode every value.
+
+```javascript
+// After the form passes validation:
+const params = new URLSearchParams({
+    first_name:   $('[name="first_name"]').val(),
+    last_name:    $('[name="last_name"]').val(),
+    company_name: $('[name="name"]').val(),        // company-name field is `name`
+    phone:        $('[name="phone"]').val(),        // E.164; '+' becomes %2B
+    email:        $('[name="email"]').val(),
+    annual_sales: $('[name="annual_sales"]').val(),
+    website:      $('[name="website"]').val()
+});
+window.location.href = `https://emap.epd.dev/?${params.toString()}`;
+```
+
+No API request, no `uuid`, and nothing to persist — the merchant leaves this site immediately. Because there is exactly one page here and the merchant is handed off after it, do not show any "Step 1 of N" / multi-step progress signal.
+
+### Variant 2 — submit, then email a resume link
+
+**On Success (HTTP 200)** of `POST /api/v1/signup`:
 ```javascript
 // Response example:
 {
@@ -136,76 +167,47 @@ Response: { uuid, step_count, message }
   "step_count": 1
 }
 
-// 1. Persist uuid and country for all subsequent steps
-localStorage.setItem('signup_uuid', response.uuid);
-localStorage.setItem('signup_step', 1);
-localStorage.setItem('signup_country', $('#country').val()); // code/slug, e.g. "US"
+// 1. Email the resume link (endpoint does an email lookup — needs the app just created).
+//    Use fetchWithRetry (skill.md → Network Resilience).
+await fetchWithRetry('https://emap.epd.dev/api/v1/signup/resume-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ email: $('[name="email"]').val() })
+});
 
-// 2. Save Step 1 field values so they are restored if the user navigates back
-saveStepData(1, '#step1Form'); // see skill.md → Form Data Persistence
+// 2. Persist completion so a refresh re-shows the confirmation view, not the form
+//    (see skill.md → Page Refresh Behavior).
+localStorage.setItem('signup_completed', 'true');
 
-// 3. Proceed to Step 2
+// 3. Show the "check your email" confirmation view.
 ```
 
-**On Validation Error (HTTP 422)**: standard shape — see skill.md → Error Handling. Stay on Step 1, display field errors, do not change URL.
+**On Validation Error (HTTP 422)** (Variant 2): standard shape — see skill.md → Error Handling. Stay on Step 1, display field errors, do not change URL.
 
 ---
 
-## Step Lock After Submission
+## After Submission
 
-**Rule**: Once Step 1 has been successfully submitted, if the user navigates back to Step 1, ALL fields must be disabled. The user cannot edit or resubmit Step 1.
+There is no back-navigation between steps here — Step 1 is the only step. What "already submitted" means, and how a page reload behaves, differs by variant:
 
-### When to apply the lock
+- **Variant 1 (redirect)**: the merchant leaves this site the instant Step 1 is valid (`window.location.href` to EasyPayDirect). There is nothing to lock or persist — if they come back to the partner site later, they simply see a fresh, blank Step 1.
+- **Variant 2 (resume email)**: after a successful submit + resume-email call, persist a completion flag and show a "check your email" confirmation view instead of the form. On page load, check this flag **first** — if it's set, render the confirmation view directly and never re-render the editable form. This prevents a refresh from showing Step 1 again (and prevents a resubmit, which would 422 with "email already registered").
 
-On Step 1 page/component load, check whether a `uuid` already exists in the persisted signup state (localStorage, sessionStorage, URL, or wherever the implementation stores it). If a `uuid` is present, Step 1 was already submitted — apply the lock immediately before rendering.
-
-### What to disable
-
-- Every `<input>`, `<select>`, and `<textarea>` inside the Step 1 form
-- The submit button
-
-⚠️ **Do not call `iti.setDisabled(true)`.** `intl-tel-input` has no `setDisabled` method in any version through at least `22.0.2` (the version pinned above) — it is not part of the library's public API. Calling it throws `TypeError: iti.setDisabled is not a function`. Because this is easy to trigger inside a `.then()` success handler right after a real, successful Step 1 submission, the thrown error commonly gets caught by an unrelated outer `.catch()` meant for genuine network failures and misreported to the user as a network error — even though Step 1 actually succeeded and a `uuid` was returned. The phone `<input>` that `intl-tel-input` wraps is disabled automatically by the plain `.prop('disabled', true)` / `disabled = true` call on "every `<input>`... inside the Step 1 form" above — no separate widget-specific call is needed or exists.
-
-### Implementation
+### Variant 2 — completion check on load
 
 ```javascript
 $(document).ready(function() {
-    const uuid = getSignupUuid(); // however the implementation retrieves it
-
-    if (uuid) {
-        // 1. Restore saved field values so the user sees their data (not empty fields)
-        //    Must run BEFORE disabling so values are written while fields are still writable
-        restoreStepData(1, '#step1Form'); // see skill.md → Form Data Persistence
-
-        // 2. Re-apply conditional field visibility based on restored country value
-        //    (e.g. business_state is shown only when country="US")
-        $('#country').trigger('change');
-
-        // 3. Re-set the intl-tel-input phone value from restored data if needed
-        //    (iti.setNumber() accepts the E.164 number stored during submission)
-        const saved = JSON.parse(localStorage.getItem('signup_step_1_data') || '{}');
-        if (typeof iti !== 'undefined' && saved.phone) {
-            iti.setNumber(saved.phone);
-        }
-
-        // 4. Lock the entire form — fields are now readable but not editable.
-        //    This also disables the plain <input> that intl-tel-input wraps —
-        //    do NOT also call iti.setDisabled(true); that method does not
-        //    exist on this library and throws if called (see "What to
-        //    disable" above).
-        $('#step1Form input, #step1Form select, #step1Form textarea')
-            .prop('disabled', true);
-        $('#step1Form button[type="submit"]').prop('disabled', true);
-
-        // Optional: show a read-only notice to the user
-        // e.g. $('#step1Notice').text('This step has already been submitted.').show();
+    if (localStorage.getItem('signup_completed') === 'true') {
+        // Already submitted in this browser — show confirmation, not the form.
+        showCheckYourEmailView();      // render the "check your email" view
+        return;                        // do not build/restore the editable Step 1 form
     }
+
+    // Otherwise render Step 1 normally.
 });
 ```
 
-### Why
-
-The `uuid` is created by the backend at Step 1 submission and identifies the active signup session. Its presence is the authoritative signal that Step 1 is complete. Resubmitting Step 1 with the same email would be rejected with a 422 "email already registered" error, so the form must prevent it client-side rather than showing a confusing error.
+Offer a "start over" affordance on the confirmation view (clears `signup_completed` and the persisted Step 1 data, then reloads a blank Step 1) so a returning merchant is never permanently stuck on the confirmation screen.
 
 ---
 
