@@ -5,6 +5,8 @@ description: Build a merchant onboarding entry form that collects account detail
 
 # Merchant Signup Form Specification
 
+**Purpose:** This skill is for EasyPayDirect partners to build merchant referral signup pages — hostable anywhere (Vercel, Netlify, or their own site) — that attribute each signup to the partner so they earn commission on the merchants they refer.
+
 Production-ready specification for building the Step 1 account form and handing the merchant off to EasyPayDirect. There is only one step on the partner's site; the merchant completes the rest of their application on EasyPayDirect itself.
 
 ---
@@ -21,11 +23,23 @@ Production-ready specification for building the Step 1 account form and handing 
 > 1. Enter partner key:
 > 2. Skip
 
-If they're unsure whether they have one or how to get it, share this:
+If they're unsure whether they have one — or how to get it — share the steps below. The API key is issued **per partner account** and stays the same across every signup, so once they have it they can reuse the same key every time; they don't need a new one per merchant.
 
-**If you're already a partner**: Log in to the partner portal → **Integration** → **API Integration** → copy the API key shown there → paste it here.
+**If you're already a partner** — get the key from the portal:
+1. Go to the EasyPayDirect partner portal at https://emap.easypaydirect.com and log in to your partner account.
+2. In the left-hand menu, open **Integration**.
+3. Under it, click **API Integration**.
+4. Your partner API key is displayed on that page. Copy it exactly as shown — no leading/trailing spaces, and copy the whole string.
+5. Paste it here.
 
-**If you're not a partner yet**: Sign up as a partner first at https://emap.easypaydirect.com/signup/partner, then follow the same steps above (Integration → API Integration → copy the key) and come back and paste it here.
+**If you're not a partner yet** — become one first, then get the key:
+1. Sign up as a partner at https://emap.easypaydirect.com/signup/partner and complete the partner registration.
+2. Once your partner account is active, log in to the partner portal (https://emap.easypaydirect.com).
+3. Open **Integration → API Integration** (same path as above).
+4. Copy the API key shown there.
+5. Come back and paste it here.
+
+If there's no **API Integration** page or no key is shown, the account likely isn't approved as a partner yet — finish/await partner approval, or contact EasyPayDirect partner support, before continuing. If they still can't get a key right now, they can choose **Skip** and add `partner_key` later; signups made without it simply won't be attributed to the partner (see the note below).
 
 Then act on their answer:
 
