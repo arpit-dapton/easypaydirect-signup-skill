@@ -27,6 +27,8 @@ The form and its fields/validation are identical for both variants; only the sub
 | country | select | Yes | Normal dropdown (no search) - API: `/api/partner/countries` |
 | business_state | select | Yes | Normal dropdown (no search) - Show only if country="US", API: `/api/partner/states` |
 | annual_sales | number | Yes | Numeric only, no currency symbols or commas |
+| industry_type | select | Yes | Normal dropdown (no search) - API: `/api/partner/industry-types`. **Use the industry `name` as the option value, not `slug`** — EasyPayDirect resolves this field by its display name (see "Industry Type Dropdown" below). |
+| industry_type_other | text | Conditional | Free-text industry. Show (and require) only when `industry_type = "Other"` (capital "O" — the label of the catch-all option). Max 255 chars. |
 | promo_code | text | No | Optional referral code |
 | partner_key | text | No | Optional partner API key for attribution — see skill.md → "MANDATORY FIRST STEP" (top of file). Ask the implementer if they have one before including it; omit entirely if not |
 | step_count | — | **Yes (Variant 2 only)** | Not a form field — in the Variant 2 signup payload, always send the literal value `1` (not user-editable). Without it, the backend never records the application as having reached step 1, so the emailed resume link lands the merchant back at the start instead of past Step 1. Variant 1 sends no payload, so `step_count` does not apply there. |
@@ -68,6 +70,43 @@ The form and its fields/validation are identical for both variants; only the sub
 
 ---
 
+## Industry Type Dropdown
+
+**Field**: `industry_type`  
+**Type**: SELECT dropdown (plain `<select>`, no search)  
+**API Endpoint**: `GET /api/partner/industry-types`
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "data": [
+    { "name": "Retail", "slug": "retail" },
+    { "name": "E-commerce", "slug": "ecommerce" },
+    { "name": "SaaS", "slug": "saas" },
+    { "name": "Other", "slug": "other" }
+  ]
+}
+```
+
+**⚠️ CRITICAL: Use the `name` field as the option value, NOT `slug` or `id`.**
+
+Unlike the country/state dropdowns (which use `code`), the industry list has only `name` and `slug`. EasyPayDirect's hosted signup resolves the `industry_type` value **by its display name** — so whichever value you put in the `<option>` is what gets forwarded (Variant 1 query param) or submitted (Variant 2 payload), and it must be the name (e.g. `"Retail"`), not the slug (`"retail"`). Sending the slug will fail to match any industry.
+
+```html
+<!-- CORRECT — value is the name -->
+<option value="Retail">Retail</option>
+<option value="E-commerce">E-commerce</option>
+<option value="Other">Other</option>
+
+<!-- WRONG — do NOT use slug -->
+<option value="retail">Retail</option>
+```
+
+**Conditional**: when the merchant selects `industry_type = "Other"`, show and require the free-text `industry_type_other` field (max 255 chars).
+
+---
+
 ## Libraries Required
 
 - `intl-tel-input@22.0.2` - Phone formatting with country selector
@@ -93,6 +132,7 @@ window.intlTelInput(phoneInputEl, {
 ```
 GET /api/partner/countries
 GET /api/partner/states
+GET /api/partner/industry-types
 ```
 
 **Form Submission** (Variant 2 only — Variant 1 makes no API call, see "Form Submission & Handoff" below):
@@ -122,12 +162,15 @@ Then, on success, `POST /api/v1/signup/resume-link` with `{ "email": "<the merch
 - Country: required, must be valid country code (e.g., "US", "CA")
 - Business State: required if country="US" (use code, not id)
 - Annual Sales: required, numeric only (no currency symbols or commas)
+- Industry Type: required, must be a value from `/api/partner/industry-types` (submit the `name`, not the slug)
+- Industry Type (Other): required if industry_type="Other", max 255 chars
 
 ---
 
 ## Dependent Fields
 
 - **business_state**: Show if country="US" (hidden by default)
+- **industry_type_other**: Show (and require) if industry_type="Other" (hidden by default)
 
 ---
 
@@ -137,20 +180,27 @@ The field validation is identical for both variants. What happens after a valid 
 
 ### Variant 1 — redirect (no API call)
 
-Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to it. Only 7 fields are forwarded; `company_name` maps to the field named `name`; no `form_id`. Encode every value.
+Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to it — the target is the `/signup` page, which prefills its own form from the query params. `company_name` maps to the field named `name`; `industry_type` carries the industry **name** (not slug — see "Industry Type Dropdown"); no `form_id`. Encode every value.
 
 ```javascript
 // After the form passes validation:
 const params = new URLSearchParams({
-    first_name:   $('[name="first_name"]').val(),
-    last_name:    $('[name="last_name"]').val(),
-    company_name: $('[name="name"]').val(),        // company-name field is `name`
-    phone:        $('[name="phone"]').val(),        // E.164; '+' becomes %2B
-    email:        $('[name="email"]').val(),
-    annual_sales: $('[name="annual_sales"]').val(),
-    website:      $('[name="website"]').val()
+    first_name:    $('[name="first_name"]').val(),
+    last_name:     $('[name="last_name"]').val(),
+    company_name:  $('[name="name"]').val(),         // company-name field is `name`
+    phone:         $('[name="phone"]').val(),         // E.164; '+' becomes %2B
+    email:         $('[name="email"]').val(),
+    annual_sales:  $('[name="annual_sales"]').val(),
+    website:       $('[name="website"]').val(),
+    industry_type: $('[name="industry_type"]').val()  // the industry NAME, e.g. "Retail"
 });
-window.location.href = `https://emap.epd.dev/?${params.toString()}`;
+// If the merchant picked "Other", forward their free-text industry too.
+const industryOther = $('[name="industry_type_other"]').val();
+if ($('[name="industry_type"]').val() === 'Other' && industryOther) {
+    params.set('industry_type_other', industryOther);
+}
+// BASE_URL is the single configured host (see reference/api-examples.md → "Configuration").
+window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 ```
 
 No API request, no `uuid`, and nothing to persist — the merchant leaves this site immediately. Because there is exactly one page here and the merchant is handed off after it, do not show any "Step 1 of N" / multi-step progress signal.
@@ -169,7 +219,7 @@ No API request, no `uuid`, and nothing to persist — the merchant leaves this s
 
 // 1. Email the resume link (endpoint does an email lookup — needs the app just created).
 //    Use fetchWithRetry (skill.md → Network Resilience).
-await fetchWithRetry('https://emap.epd.dev/api/v1/signup/resume-link', {
+await fetchWithRetry(`${BASE_URL}/api/v1/signup/resume-link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     body: JSON.stringify({ email: $('[name="email"]').val() })
@@ -213,8 +263,8 @@ Offer a "start over" affordance on the confirmation view (clears `signup_complet
 
 ## Field Summary
 
-**Total Fields**: 11  
-**Required Fields**: 9 (all except promo_code and partner_key)  
-**Conditionally Required**: 1 (business_state - required if country=US)  
+**Total Fields**: 13  
+**Required Fields**: 9 (all except business_state, industry_type_other, promo_code, partner_key)  
+**Conditionally Required**: 2 (business_state - required if country=US; industry_type_other - required if industry_type="Other")  
 **Optional**: 2 (promo_code, partner_key)  
 **Phone Fields**: 1 (intl-tel-input)

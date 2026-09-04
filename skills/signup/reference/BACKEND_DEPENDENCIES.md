@@ -7,19 +7,22 @@ description: What each of the two Step-1-only signup variants needs from EasyPay
 
 Both variants build only Step 1 on the partner's site. They differ only in what happens after Step 1.
 
+> **`{base_url}` is a single configurable host.** Every URL below — the redirect target and both API endpoints — is `base_url` + a path. It defaults to `https://emap.epd.dev`; change that one value to point at another environment. In code it's the `BASE_URL` constant (see [api-examples.md → Configuration](api-examples.md#configuration--the-single-base-url)).
+
 ---
 
 ## Variant 1 (redirect) — no backend needed
 
-Variant 1 makes **no API call at all**. After the merchant fills Step 1, redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params — EasyPayDirect prefills its own form from them:
+Variant 1 makes **no API call at all**. After the merchant fills Step 1, redirect the browser to EasyPayDirect's hosted-signup `/signup` page with the Step 1 values as query params — that page prefills its own form from them:
 
 ```
-https://emap.epd.dev/?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}
+{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&industry_type={industry_type}
 ```
 
 - **URL-encode every value** with `encodeURIComponent`. The E.164 phone's leading `+` becomes `%2B`.
 - **`company_name` maps to the Step 1 field named `name`** (the company-name field is `name`, not `company_name`).
-- Only these 7 fields are forwarded. `country`, `business_state`, `promo_code`, and `partner_key` are still collected on the form but are not part of the redirect.
+- **`industry_type` is the industry's display name** (e.g. `Retail`), not the slug — the `/signup` page resolves the industry by name. If the merchant picked "Other", also append `&industry_type_other={free text}`.
+- `country`, `business_state`, `promo_code`, and `partner_key` are still collected on the form but are not part of the redirect.
 - No `form_id` is sent — it is not required for this flow.
 
 Because nothing is submitted to `/api/v1/signup`, there is no `uuid`, no persisted application, and no partner attribution in this variant.
@@ -61,5 +64,5 @@ Unauthenticated. Call it immediately after the signup POST succeeds, with the sa
 
 | Variant | What it needs from EasyPayDirect |
 |---|---|
-| 1 (redirect) | Nothing — client-side redirect to `https://emap.epd.dev/?...` with the 7 mapped query params |
+| 1 (redirect) | Nothing — client-side redirect to `{base_url}/signup?...` with the mapped query params (incl. `industry_type` as the industry name) |
 | 2 (resume email) | `POST /api/v1/signup` (with `step_count:1`), then `POST /api/v1/signup/resume-link` with the email |

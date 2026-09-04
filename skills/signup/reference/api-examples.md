@@ -4,6 +4,23 @@ Ready-to-use code for the Step-1-only signup form and its two handoff variants.
 
 ---
 
+## Configuration — the single base URL
+
+Every URL in this skill (dropdown fetches, the Variant 1 redirect, and the Variant 2 API calls) is built from **one** host. Define it once and reference it everywhere — to point the form at a different environment, change this single value and nothing else:
+
+```javascript
+// The ONE place the host is configured. Change this to switch environments.
+const BASE_URL = 'https://emap.epd.dev';
+```
+
+All the examples below assume this `BASE_URL` is in scope and build their URLs from it as `` `${BASE_URL}/…` ``. Do not hardcode the host anywhere else. For cURL, set it as a shell variable once:
+
+```bash
+BASE_URL="https://emap.epd.dev"
+```
+
+---
+
 ## Authentication
 
 ⚠️ **None of these endpoints require authentication.** Do not send `X-API-Key` or `Authorization` headers to the dropdown endpoints, to `POST /api/v1/signup`, or to `POST /api/v1/signup/resume-link`.
@@ -14,7 +31,7 @@ The one exception: `POST /api/v1/signup` accepts an **optional `partner_key` fie
 
 ## Dropdown APIs
 
-Step 1 has exactly two dropdowns — Countries and US States. Both use the `code` field as the option value (see [DROPDOWNS_REFERENCE.md](DROPDOWNS_REFERENCE.md)).
+Step 1 has three dropdowns — Countries, US States, and Industry Types. Countries and US States use the `code` field as the option value; Industry Types use the `name` field (see [DROPDOWNS_REFERENCE.md](DROPDOWNS_REFERENCE.md)).
 
 ### Load Countries
 
@@ -22,7 +39,7 @@ Step 1 has exactly two dropdowns — Countries and US States. Both use the `code
 ```javascript
 async function loadCountries() {
   try {
-    const response = await fetch('https://emap.epd.dev/api/partner/countries');
+    const response = await fetch(`${BASE_URL}/api/partner/countries`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const result = await response.json();
     return result.data;  // [{name: "United States", code: "US"}, ...]
@@ -45,7 +62,7 @@ countries.forEach(country => {
 
 **cURL**:
 ```bash
-curl -X GET "https://emap.epd.dev/api/partner/countries" \
+curl -X GET "$BASE_URL/api/partner/countries" \
   -H "Content-Type: application/json"
 
 # Response:
@@ -65,10 +82,40 @@ States populate the `business_state` dropdown, which is shown/required only when
 
 ```javascript
 async function loadStates() {
-  const response = await fetch('https://emap.epd.dev/api/partner/states');
+  const response = await fetch(`${BASE_URL}/api/partner/states`);
   const result = await response.json();
   return result.data;  // [{name: "California", code: "CA"}, ...]
 }
+```
+
+### Load Industry Types
+
+Populates the `industry_type` dropdown. The list has only `name` and `slug` — **use `name` as the option value** (EasyPayDirect resolves the industry by its display name, not the slug).
+
+```javascript
+async function loadIndustries() {
+  const response = await fetch(`${BASE_URL}/api/partner/industry-types`);
+  const result = await response.json();
+  return result.data;  // [{name: "Retail", slug: "retail"}, {name: "Other", slug: "other"}, ...]
+}
+
+// Populate dropdown — value is the NAME, not the slug
+const industries = await loadIndustries();
+const industrySelect = document.querySelector('select[name="industry_type"]');
+industries.forEach(ind => {
+  const option = document.createElement('option');
+  option.value = ind.name;              // use name, not slug
+  option.textContent = ind.name;
+  industrySelect.appendChild(option);
+});
+
+// When "Other" is selected, show/require the free-text industry_type_other field.
+industrySelect.addEventListener('change', (e) => {
+  const isOther = e.target.value === 'Other';
+  const otherGroup = document.getElementById('industry_type_other_group');
+  otherGroup.hidden = !isOther;
+  otherGroup.querySelector('[name="industry_type_other"]').required = isOther;
+});
 ```
 
 ---
@@ -88,6 +135,8 @@ function readStep1(form) {
     website:        form.querySelector('[name="website"]').value,
     country:        form.querySelector('[name="country"]').value,     // code, e.g. "US"
     annual_sales:   form.querySelector('[name="annual_sales"]').value,
+    industry_type:  form.querySelector('[name="industry_type"]').value, // the NAME, e.g. "Retail"
+    industry_type_other: form.querySelector('[name="industry_type_other"]')?.value || '',
     business_state: form.querySelector('[name="business_state"]')?.value || '',
     promo_code:     form.querySelector('[name="promo_code"]')?.value || ''
   };
@@ -98,20 +147,25 @@ function readStep1(form) {
 
 ## Variant 1 — redirect to EasyPayDirect (no API call)
 
-Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to it. Only 7 fields are forwarded; `company_name` maps to the `name` field. No `form_id`, no API request.
+Build EasyPayDirect's hosted-signup URL from the Step 1 values and navigate to the `/signup` page, which prefills its own form from the query params. `company_name` maps to the `name` field; `industry_type` carries the industry **name**. No `form_id`, no API request.
 
 ```javascript
 function redirectToEmap(step1) {
   const params = new URLSearchParams({
-    first_name:   step1.first_name,
-    last_name:    step1.last_name,
-    company_name: step1.name,          // company-name field is `name`
-    phone:        step1.phone,         // '+' is encoded to %2B automatically
-    email:        step1.email,
-    annual_sales: step1.annual_sales,
-    website:      step1.website
+    first_name:    step1.first_name,
+    last_name:     step1.last_name,
+    company_name:  step1.name,          // company-name field is `name`
+    phone:         step1.phone,         // '+' is encoded to %2B automatically
+    email:         step1.email,
+    annual_sales:  step1.annual_sales,
+    website:       step1.website,
+    industry_type: step1.industry_type  // the industry NAME, e.g. "Retail"
   });
-  window.location.href = `https://emap.epd.dev/?${params.toString()}`;
+  // If the merchant picked "Other", forward their free-text industry too.
+  if (step1.industry_type === 'Other' && step1.industry_type_other) {
+    params.set('industry_type_other', step1.industry_type_other);
+  }
+  window.location.href = `${BASE_URL}/signup?${params.toString()}`;
 }
 
 // Usage
@@ -141,14 +195,19 @@ async function submitVariant2(step1, partnerKey) {
     website: step1.website,
     country: step1.country,
     annual_sales: parseInt(step1.annual_sales, 10),
+    industry_type: step1.industry_type,   // the industry NAME, e.g. "Retail"
     business_state: step1.business_state || null,
     step_count: 1
   };
+  // Only when the merchant picked "Other"
+  if (step1.industry_type === 'Other' && step1.industry_type_other) {
+    payload.industry_type_other = step1.industry_type_other;
+  }
   // OPTIONAL: only if the implementer supplied a partner key (see skill.md → MANDATORY FIRST STEP)
   if (partnerKey) payload.partner_key = partnerKey;
 
   // 1. Create the application
-  const signup = await fetchWithRetry('https://emap.epd.dev/api/v1/signup', {
+  const signup = await fetchWithRetry(`${BASE_URL}/api/v1/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     body: JSON.stringify(payload)
@@ -161,7 +220,7 @@ async function submitVariant2(step1, partnerKey) {
   }
 
   // 2. Email the resume link (endpoint does an email lookup — needs the app created above)
-  await fetchWithRetry('https://emap.epd.dev/api/v1/signup/resume-link', {
+  await fetchWithRetry(`${BASE_URL}/api/v1/signup/resume-link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     body: JSON.stringify({ email: step1.email })
@@ -175,16 +234,17 @@ async function submitVariant2(step1, partnerKey) {
 
 **cURL — the two calls**:
 ```bash
-curl -X POST "https://emap.epd.dev/api/v1/signup" \
+curl -X POST "$BASE_URL/api/v1/signup" \
   -H "Content-Type: application/json" \
   -d '{
     "first_name": "John", "last_name": "Doe", "email": "john@example.com",
     "phone": "+12015551234", "name": "Acme Corp", "website": "https://acme.com",
-    "country": "US", "annual_sales": 500000, "business_state": "CA", "step_count": 1
+    "country": "US", "annual_sales": 500000, "industry_type": "Retail",
+    "business_state": "CA", "step_count": 1
   }'
 # Success (200): { "status": true, "uuid": "...", "step_count": 1, "message": "Account created successfully" }
 
-curl -X POST "https://emap.epd.dev/api/v1/signup/resume-link" \
+curl -X POST "$BASE_URL/api/v1/signup/resume-link" \
   -H "Content-Type: application/json" \
   -d '{ "email": "john@example.com" }'
 # Success (200): { "status": true, "message": "Resume link sent" }
@@ -201,11 +261,13 @@ See [skill.md](../SKILL.md) → Error Handling for status codes, response shapes
 ## Quick Copy-Paste Template
 
 ```javascript
+// const BASE_URL = 'https://emap.epd.dev';  // configured once (see "Configuration" above)
+
 // Dropdown fetch
-const response = await fetch('https://emap.epd.dev/api/partner/{ENDPOINT}');
+const response = await fetch(`${BASE_URL}/api/partner/{ENDPOINT}`);
 
 // Form submission (Variant 2)
-const response = await fetch('https://emap.epd.dev/api/v1/{ENDPOINT}', {
+const response = await fetch(`${BASE_URL}/api/v1/{ENDPOINT}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(payload)

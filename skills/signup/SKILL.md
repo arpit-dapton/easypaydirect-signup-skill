@@ -68,12 +68,12 @@ Then act on their answer:
 
 | Answer | What to do (internal) |
 |---|---|
-| **1. Quick start, then continue on EasyPayDirect** (Variant 1 — redirect) | Build **only** the Step 1 page/form. On a valid submit, make **no API call** — instead redirect the browser to EasyPayDirect's hosted signup with the Step 1 values as query params: `https://emap.epd.dev/?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}`. URL-encode every value (use `URLSearchParams`); **`company_name` maps to the field named `name`**; do **not** send `form_id`. Only those 7 fields are forwarded — `country`/`business_state`/`promo_code`/`partner_key` are still collected on the form but not part of the redirect. **Strip every "N of N" / multi-step signal** — no progress bar, no "Step 1 of …" subtitle, no step counter. There is exactly one step on this site. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
+| **1. Quick start, then continue on EasyPayDirect** (Variant 1 — redirect) | Build **only** the Step 1 page/form. On a valid submit, make **no API call** — instead redirect the browser to EasyPayDirect's hosted-signup `/signup` page with the Step 1 values as query params: `{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&industry_type={industry_type}` (`base_url` defaults to `https://emap.epd.dev` — see "Required Implementation Parameters"). URL-encode every value (use `URLSearchParams`); **`company_name` maps to the field named `name`**; **`industry_type` is the industry's display name, not the slug** (append `&industry_type_other=…` when the merchant picks "Other"); do **not** send `form_id`. `country`/`business_state`/`promo_code`/`partner_key` are still collected on the form but not part of the redirect. **Strip every "N of N" / multi-step signal** — no progress bar, no "Step 1 of …" subtitle, no step counter. There is exactly one step on this site. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
 | **2. Quick start, then we email them a link** (Variant 2 — resume email) | Build **only** the Step 1 page/form. On a valid submit, `POST /api/v1/signup` (with `"step_count": 1`, and `partner_key` if the implementer supplied one) to create the application, then — automatically, no extra click — `POST /api/v1/signup/resume-link` with the merchant's `email` (read straight from the just-submitted Step 1 data; never prompt them to re-enter it). Then persist a completion flag and show a "check your email" confirmation view. **Strip every multi-step signal** here too — this site has one step. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
 
 ### Variant 1 & 2 Backend Endpoints
 
-- **Variant 1 (redirect)** needs no backend at all — it's a pure client-side redirect to `https://emap.epd.dev/?<query params>`. EasyPayDirect prefills its own form from the params. Nothing in the API changes or is called.
+- **Variant 1 (redirect)** needs no backend at all — it's a pure client-side redirect to `{base_url}/signup?<query params>`. The `/signup` page prefills its own form from the params. Nothing in the API changes or is called.
 - **Variant 2 (resume email)** — `POST /api/v1/signup` then `POST /api/v1/signup/resume-link` (body `{"email": "<merchant's email>"}`). The latter returns `{"status":true,"message":"Resume link sent"}` (200, always — never reveals whether an email matches an account) and emails the merchant a resume link via EasyPayDirect's existing "finish later" template; `422` for a missing/invalid email, `429` if rate-limited (5 requests / 5 minutes per IP). Both endpoints are unauthenticated. Include `"step_count": 1` in the signup payload so the emailed link resumes past Step 1 rather than at the start.
 
 Full detail and implementation notes are in [reference/BACKEND_DEPENDENCIES.md](reference/BACKEND_DEPENDENCIES.md).
@@ -113,7 +113,9 @@ Before building the form, configure this **required** parameter:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| **base_url** | string | Base URL for all API endpoints |
+| **base_url** | string | The single host every URL in this skill is built from — dropdown fetches, the Variant 1 redirect target, and the Variant 2 API calls. Defaults to `https://emap.epd.dev`. |
+
+⚠️ **Configure the host in exactly one place.** Define it once as a `BASE_URL` constant and build every URL as `` `${BASE_URL}/…` `` — never hardcode `https://emap.epd.dev` inline in more than one spot. Switching environments (staging, a self-hosted instance, etc.) must be a one-line change. The URLs written out below and in the reference files show `{base_url}` as a placeholder for exactly this value. See [reference/api-examples.md](reference/api-examples.md#configuration--the-single-base-url) → "Configuration".
 
 ---
 
@@ -321,17 +323,19 @@ $(document).ready(function() {
 
 **Both variants**:
 - [ ] Country and US-State dropdowns load with real `<option>` **values** (the `code`, not `undefined` or the numeric `id`) — check the actual value, not just that labels appear.
+- [ ] Industry Type dropdown loads from `/api/partner/industry-types` with the **name** as each option value (e.g. `"Retail"`), not the slug.
 - [ ] `business_state` appears (and is required) only when `country="US"`, hidden otherwise.
+- [ ] `industry_type_other` appears (and is required) only when `industry_type="Other"`, hidden otherwise.
 - [ ] Required-field validation fires on all Step 1 fields before any handoff.
 - [ ] No "Step 1 of N" / multi-step progress signal is shown anywhere — there is exactly one step.
 - [ ] Phone submits/forwards as a valid E.164 value; `annual_sales` is an integer.
 
 **Variant 1 (redirect)**:
-- [ ] On a valid submit the browser is sent to `https://emap.epd.dev/?...` with all 7 params present and URL-encoded.
-- [ ] `company_name` in the URL carries the value of the `name` field; no `form_id` is included; no API call is made.
+- [ ] On a valid submit the browser is sent to `{base_url}/signup?...` with all params present and URL-encoded.
+- [ ] `company_name` in the URL carries the value of the `name` field; `industry_type` carries the industry **name** (not slug); no `form_id` is included; no API call is made.
 
 **Variant 2 (resume email)**:
-- [ ] On a valid submit, `POST /api/v1/signup` includes `step_count:1` (and `partner_key` only if supplied), then `POST /api/v1/signup/resume-link` is called automatically with the same email — no second click, no re-entering the email.
+- [ ] On a valid submit, `POST /api/v1/signup` includes `industry_type` (the name) and `step_count:1` (and `partner_key` only if supplied), then `POST /api/v1/signup/resume-link` is called automatically with the same email — no second click, no re-entering the email.
 - [ ] After success the "check your email" confirmation view is shown and `signup_completed` is persisted.
 - [ ] A page refresh after completion shows the confirmation view, not the Step 1 form.
 - [ ] 422 responses display field errors without changing the URL.
