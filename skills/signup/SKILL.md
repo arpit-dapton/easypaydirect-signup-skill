@@ -48,7 +48,7 @@ Then act on their answer:
 | **1. Enter partner key** | Collect the exact key value from them. When you build Step 1's submission, include it as `partner_key` in the **Step 1 JSON payload body** (not a header) — see [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) and "Partner Attribution Payload" below. |
 | **2. Skip** | Do not include `partner_key` in the payload at all. Do not send an empty string, `null`, or a placeholder. |
 
-ℹ️ `partner_key` is only ever sent in **Variant 2** (the resume-email flow), which is the only variant that calls `POST /api/v1/signup`. **Variant 1** (redirect) makes no API call, so there is nowhere to attribute a partner key — collect the answer anyway (the merchant may not have picked a variant yet), but know it has no effect if they choose Variant 1.
+ℹ️ Both variants carry the partner key, just differently: **Variant 2** sends it as the `partner_key` field in the `POST /api/v1/signup` payload; **Variant 1** (redirect) has no API call, so it forwards the same key as a `secretKey` query param on the `/signup` redirect, which EasyPayDirect resolves to the partner and records as `partner_id`. Either way, collect the key up front (the merchant may not have picked a variant yet).
 
 Only after the user has actually answered this question should you continue to the next mandatory step below.
 
@@ -68,7 +68,7 @@ Then act on their answer:
 
 | Answer | What to do (internal) |
 |---|---|
-| **1. Quick start, then continue on EasyPayDirect** (Variant 1 — redirect) | Build **only** the Step 1 page/form. On a valid submit, make **no API call** — instead redirect the browser to EasyPayDirect's hosted-signup `/signup` page with the Step 1 values as query params: `{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&industry_type={industry_type}` (`base_url` defaults to `https://emap.epd.dev` — see "Required Implementation Parameters"). URL-encode every value (use `URLSearchParams`); **`company_name` maps to the field named `name`**; **`industry_type` is the industry's display name, not the slug** (append `&industry_type_other=…` when the merchant picks "Other"); do **not** send `form_id`. `country`/`business_state`/`promo_code`/`partner_key` are still collected on the form but not part of the redirect. **Strip every "N of N" / multi-step signal** — no progress bar, no "Step 1 of …" subtitle, no step counter. There is exactly one step on this site. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
+| **1. Quick start, then continue on EasyPayDirect** (Variant 1 — redirect) | Build **only** the Step 1 page/form. On a valid submit, make **no API call** — instead redirect the browser to EasyPayDirect's hosted-signup `/signup` page with the Step 1 values as query params: `{base_url}/signup?first_name={first_name}&last_name={last_name}&company_name={name}&phone={phone}&email={email}&annual_sales={annual_sales}&website={website}&country={country_name}&industry_type={industry_type}` (`base_url` defaults to `https://emap.epd.dev` — see "Required Implementation Parameters"). URL-encode every value (use `URLSearchParams`); **`company_name` maps to the field named `name`**; **`country` is the country's display name, not the `US`-style code** (`/signup` resolves country by name — forward the selected option's label); **`industry_type` is the industry's display name, not the slug** (append `&industry_type_other=…` when the merchant picks "Other"); append `&business_state={code}` (the 2-letter state code) when the merchant is in the US — `/signup` resolves it to the state id; append `&promo_code=…` when the merchant entered one; append `&secretKey={partner_key}` when the implementer supplied a partner key (this is how the redirect variant attributes the signup to a partner — `/signup` records `partner_id` from it); do **not** send `form_id`. `business_state` also drives the in-form state conditional. **Strip every "N of N" / multi-step signal** — no progress bar, no "Step 1 of …" subtitle, no step counter. There is exactly one step on this site. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
 | **2. Quick start, then we email them a link** (Variant 2 — resume email) | Build **only** the Step 1 page/form. On a valid submit, `POST /api/v1/signup` (with `"step_count": 1`, and `partner_key` if the implementer supplied one) to create the application, then — automatically, no extra click — `POST /api/v1/signup/resume-link` with the merchant's `email` (read straight from the just-submitted Step 1 data; never prompt them to re-enter it). Then persist a completion flag and show a "check your email" confirmation view. **Strip every multi-step signal** here too — this site has one step. See [steps/STEP1_ACCOUNT_INFORMATION.md](steps/STEP1_ACCOUNT_INFORMATION.md) → "Form Submission & Handoff" and "Variant 1 & 2 Backend Endpoints" below. |
 
 ### Variant 1 & 2 Backend Endpoints
@@ -144,7 +144,7 @@ Reference for the `partner_key` field asked about above:
 
 This is **not authentication** — it only attributes the signup to a partner account for commission/reporting purposes:
 - If `partner_key` is present but doesn't match any user's key, Step 1 still succeeds; the signup just isn't attributed to a partner.
-- Only sent in Variant 2, the only variant that POSTs to `/api/v1/signup`. Variant 1 (redirect) makes no API call, so `partner_key` has no effect there.
+- Carried by **both** variants: as the `partner_key` payload field in Variant 2's `POST /api/v1/signup`, and as a `secretKey` query param on Variant 1's `/signup` redirect (same key, same effect — the created application gets `partner_id` set).
 
 ---
 
@@ -313,7 +313,7 @@ $(document).ready(function() {
 
 ### The Step 1 Country
 
-`country` is a normal Step 1 dropdown. Its only in-form job is the one conditional — show/require `business_state` when `country = "US"`. Compare against the country **code/slug** (`"US"`, `"CA"`, ...), never the numeric `id`. In Variant 2 it's part of the signup payload; in Variant 1 it's collected but not forwarded to the redirect.
+`country` is a normal Step 1 dropdown. Its in-form job is the one conditional — show/require `business_state` when `country = "US"`. The `<option>` **value** is the country **code/slug** (`"US"`, `"CA"`, ...), never the numeric `id` — use that value for the conditional and for the Variant 2 payload. The two variants forward it differently: Variant 2 sends the **code** in the signup payload; Variant 1's redirect sends the country **name** (the option's label, e.g. `"United States"`) because `/signup` resolves country by name. Both come from the same dropdown — read `.value` for the code, the selected option's text for the name.
 
 ---
 
@@ -332,10 +332,10 @@ $(document).ready(function() {
 
 **Variant 1 (redirect)**:
 - [ ] On a valid submit the browser is sent to `{base_url}/signup?...` with all params present and URL-encoded.
-- [ ] `company_name` in the URL carries the value of the `name` field; `industry_type` carries the industry **name** (not slug); no `form_id` is included; no API call is made.
+- [ ] `company_name` in the URL carries the value of the `name` field; `country` carries the country **name** (not the `US`-style code); `industry_type` carries the industry **name** (not slug); `industry_type_other` is appended when "Other" is chosen; `business_state` (the 2-letter code) is appended when the merchant is in the US; `promo_code` is appended when entered; `secretKey` is appended when a partner key was supplied; no `form_id` is included; no API call is made.
 
 **Variant 2 (resume email)**:
-- [ ] On a valid submit, `POST /api/v1/signup` includes `industry_type` (the name) and `step_count:1` (and `partner_key` only if supplied), then `POST /api/v1/signup/resume-link` is called automatically with the same email — no second click, no re-entering the email.
+- [ ] On a valid submit, `POST /api/v1/signup` includes `industry_type` (the name), `business_state` (when `country="US"`) and `step_count:1` (plus `promo_code` when entered, `industry_type_other` when "Other", and `partner_key` only if supplied), then `POST /api/v1/signup/resume-link` is called automatically with the same email — no second click, no re-entering the email.
 - [ ] After success the "check your email" confirmation view is shown and `signup_completed` is persisted.
 - [ ] A page refresh after completion shows the confirmation view, not the Step 1 form.
 - [ ] 422 responses display field errors without changing the URL.
